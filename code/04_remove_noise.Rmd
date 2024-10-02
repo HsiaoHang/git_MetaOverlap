@@ -1,0 +1,231 @@
+---
+title: "04_Nlengthgroup_Cleaning"
+output: html_document
+---
+#Set working directory
+```{r setup}
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+
+knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+```
+
+#library
+```{r}
+library("tidyverse")
+library("readxl")
+```
+
+#------------Functions--------------------
+#<Function>: Reduce the noises
+
+Removing Year with number of lengthgroup < X 
+(X depends on Num of lengthgroup)
+
+*Require importing critical.group.num vector (depends on length-group Scenario, can be freely defined)*
+Step1. Count the number of length-groups in each year (year.denoise.group)
+Step2. Count numyear that acheive critical_lengthgroup or all_lengthgroup
+Step3. Merge & Remove Year with number of lengthgroup < X 
+```{r}
+
+denoise_group_data <- function(fish.data, group.num, critical.group.num){
+  #Step1.
+  year.denoise.group <- fish.data %>% 
+  ungroup() %>% select(-subarea,-cpue_length_subarea_yearqua) %>%
+
+  group_by(region,species,yearqua) %>%
+  summarise(num_group_year=n_distinct(length_group)) %>%
+    #Step2.
+  group_by(region,species) %>%
+  mutate(num_year_group_above_critical=length(which(num_group_year >= critical.group.num)),
+         num_year_all_group=length(which(num_group_year==group.num))) %>%
+  unique()
+  #Step3.
+  cpue.length.subarea.yearqua <- left_join(fish.data,year.denoise.group)
+  
+  cpue.length.subarea.yearqua <- cpue.length.subarea.yearqua %>%
+     filter(num_group_year >= critical.group.num)
+  
+  
+  print(paste0("For lengthgroup = ",group.num," senario, subset rows from ", dim(fish.data)[1], " to ",
+               dim(cpue.length.subarea.yearqua)[1]))
+  
+  return(cpue.length.subarea.yearqua)
+}
+
+```
+
+#------------Remove noises--------------------
+#<With Loop> Remove noises of incomplete lengthgroup
+*critical.group.num can be freely defined as we wish*
+
+@HHT 2022.03.23------------------------------------
+Have error message when running this chunk:
+! Can't join on `x$region` x `y$region` because of incompatible types.
+ℹ `x$region` is of type <character>>.
+ℹ `y$region` is of type <logical>>.
+
+But no error message when running the next chunk <Without Loop> -----------------------------------------------
+```{r}
+group.num = seq(5,10,1)
+cutoff = c(0.1,1,3)
+
+for (i in 1:length(group.num)) {
+  for (j in 1:length(cutoff)) {
+    
+  
+    import.dir = paste0("data/initial_data/lengthgroup_specific/",group.num[i],
+                  "_lengthgroup/with_extreme/cutoff_",cutoff[j],"/",group.num[i],"_lengthgroup_cut.csv") 
+    all.region.data <- read.csv(import.dir)
+    
+    import.dir2 = paste0("data/initial_data/lengthgroup_specific/",group.num[i],
+                  "_lengthgroup/with_extreme/cutoff_",cutoff[j],"/filtered_species_",group.num[i],"_lengthgroup.csv")
+    selected.sp <- read.csv(import.dir2) %>% select(region,species)
+
+    all.region.data <- all.region.data %>% inner_join(selected.sp)
+  
+    all.region.data <- denoise_group_data(all.region.data,
+                                          group.num = group.num[i],
+                                          critical.group.num = round(0.8*group.num[i]))
+  
+  
+  
+    export.dir = paste0("data/initial_data/lengthgroup_specific/",group.num[i],
+                 "_lengthgroup/with_extreme/cutoff_",cutoff[j],"/",group.num[i],"_lengthgroup_denoise.csv")
+  
+    write.csv(all.region.data, file = export.dir )
+  }
+}
+
+```
+
+#<Without Loop> Remove noises of incomplete number of lengthgroup
+*Run above function step by step*
+Step1. Load (1) cpue data with 5 lengthgroup (2) species list
+Step2. Filter species with list
+Step3. Remove noises & Save data
+
+(demonstrated here with 5 length-groups & 1% cutoff)
+```{r}
+
+#Step1.
+fish.data <- read.csv("data/initial_data/lengthgroup_specific/5_lengthgroup/with_extreme/cutoff_1/5_lengthgroup_cut.csv")
+selected.sp <-  read.csv("data/initial_data/lengthgroup_specific/5_lengthgroup/with_extreme/cutoff_1/filtered_species_5_lengthgroup.csv") %>% select(-X) %>%
+  select(region,species)
+
+fish.data <- fish.data %>%
+  select(-X) %>% 
+  mutate_at("species",as.factor)
+
+#Step2. 
+fish.data <- fish.data %>% inner_join(selected.sp)
+
+
+#Step3.
+group.num=5
+critical.group.num = 4
+
+cpue.length.subarea.yearqua <- denoise_group_data(fish.data, group.num = 5,
+                                                  critical.group.num = 0.8*5)
+
+write.csv(cpue.length.subarea.yearqua,file = "data/initial_data/lengthgroup_specific/5_lengthgroup/with_extreme/cutoff_1/5_lengthgroup_denoise.csv")
+
+```
+
+
+#------------Below are skippable---------
+#Plotting Year-lengthgroup relationship
+
+*1225 edit*
+*Check effects of Num_lengthgroup on data reliability*
+Reliability:
+(1) RangeSize dynamics with year
+(2) CPUE_Length dynamics with year
+(3) NumYear_AboveCritical
+(4) NumYear_AllLength
+```{r}
+
+length.group <- list()
+group.num = seq(5,10,1)
+cutoff = c(0.1,1,3,5,10)
+time=1
+
+
+for ( i in 1:length(group.num)) {
+  for (j in 1:length(cutoff)) {
+  
+  length.group[[time]] <- 
+    read.csv(paste0("data/initial_data/lengthgroup_specific/",group.num[i],
+                    "_lengthgroup/with_extreme/cutoff_",cutoff[j],
+                    "/",group.num[i],"_lengthgroup_denoise.csv")) %>% 
+    mutate(num_group=group.num[i],
+           cutoff=cutoff[j]) %>%
+    relocate(num_group,.before = "yearqua")
+  
+  time=time+1
+  }
+  
+}
+
+
+length.group.summary <- bind_rows(length.group) %>%
+  filter(cutoff == 10) %>%
+  select(-X,-X.1) %>%
+  group_by(region,species,num_group,yearqua,length_group) %>% 
+  mutate(range_group_year=n_distinct(subarea),
+         cpue_group_year=sum(cpue_length_subarea_yearqua)) %>%
+  select(-subarea,-cpue_length_subarea_yearqua,-num_group_year) %>%
+  unique() %>% 
+  mutate(region_abbr=case_when(
+    region == "Baltic Sea" ~ "BS",
+    region == "Eastern Bering Sea" ~ "EBS",
+    region == "North Sea" ~ "NS",
+    region == "Scottish West Coast" ~ "SWC"
+  )) %>%
+  mutate(population=paste0(region_abbr,"-",species)) %>%
+  mutate_at("length_group",as.character)
+
+
+regional.pop.list <- unique(length.group.summary$population)
+
+length.group.summary.2 <- length.group.summary %>% 
+  ungroup() %>%
+  relocate(population,.before = "num_group") %>%
+  select(population,num_group,num_year_all_group,num_year_group_above_critical) %>%
+  gather(key="num_year_criteria",
+         value = "num_year",c(num_year_all_group,num_year_group_above_critical))
+
+
+ggplot(data=length.group.summary.2, aes(x=num_group,y=num_year,color=num_year_criteria))+
+  geom_point(size=2)+
+  geom_line(aes(group=num_year_criteria))+
+  facet_wrap(~population) +
+  theme(legend.position="top")
+ggsave(paste0("figure/numyear_lengthgroup/cutoff_10/num_year_lengthgroup.tiff"),width = 14,height = 10,dpi=300)
+
+
+
+for ( regional.pop in regional.pop.list) {
+  
+  ggplot(data=length.group.summary[which(length.group.summary$population==regional.pop),],     
+       aes(x=yearqua,y=range_group_year,color=length_group))+
+  geom_line(aes(group=length_group))+
+  geom_point()+
+  #geom_smooth(method = "lm",aes(group=Length))+
+  facet_wrap(~num_group)
+  ggsave(paste0("figure/range_size/cutoff_1/",regional.pop,".tiff"),width = 12,height = 8,dpi=300)
+  
+  ggplot(data=length.group.summary[which(length.group.summary$population==regional.pop),],     
+       aes(x=yearqua,y=log(cpue_group_year),color=length_group))+
+  geom_line(aes(group=length_group))+
+  geom_point()+
+  #geom_smooth(method = "lm",aes(group=Length))+
+  facet_wrap(~num_group)
+  ggsave(paste0("figure/cpue_lengthgroup/cutoff_1/",regional.pop,".tiff"),width = 12,height = 8,dpi=300)
+  
+  
+}
+```
+
+
+

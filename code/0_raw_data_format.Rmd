@@ -1,0 +1,303 @@
+---
+title: "0_format_raw_data"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+#Set working directory
+```{r setup}
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+
+
+knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+
+
+```
+
+
+#library
+```{r}
+library("tidyverse")
+library("tidyr")
+
+```
+
+#------------North Sea--------------------
+# Call North Sea raw data to check column name
+```{r}
+ 
+ns.fish.raw <- read.csv("data/raw_data/NS_1977-2021Q1.csv") 
+names(ns.fish.raw)
+
+ns <- ns.fish.raw %>%
+  select(-X.1,-X,-Survey,-Area,-AphiaID,-DateofCalculation) %>%
+  rename(year=Year,
+         quarter=Quarter,
+         subarea=SubArea,
+         species=Species,
+         length=LngtClass,
+         cpue_number_per_hour=CPUE_number_per_hour,
+         region=Region)
+
+ns <- ns %>% 
+  relocate("region",.before = "year") %>% 
+  mutate_at("species", as.character)
+
+```
+
+# Save NS 
+```{r}
+write.csv(ns,file="data/raw_data/ns_raw_formatted.csv")
+```
+
+#------------Scotish West Coast--------------------
+# Call Scotish West Coast raw data to check column name
+```{r}
+ 
+swc.fish.raw <- read.csv("data/raw_data/SWC_all.csv")
+swc.fish.raw$region <-"Scottish West Coast"
+names(swc.fish.raw)
+
+swc <- swc.fish.raw %>%
+  select(-Survey,-Area,-AphiaID,-DateofCalculation) %>%
+  rename(year=Year,
+         quarter=Quarter,
+         subarea=SubArea,
+         species=Species,
+         length=LngtClass,
+         cpue_number_per_hour=CPUE_number_per_hour)
+
+swc <- swc %>%
+  relocate("region",.before = "year") %>% 
+  mutate_at("species", as.character)
+
+```
+
+# Save SWC 
+```{r}
+write.csv(swc,file="data/raw_data/swc_raw_formatted.csv")
+```
+
+
+#------------Baltic--------------------
+
+# Baltic: herring & sprat
+```{r}
+getwd()
+
+bal.herring <- read.csv("data/raw_data/baltic_sea_raw/bal_herring_data_raw_mich.csv")
+
+bal.herring <- bal.herring %>%
+ pivot_longer(cols = starts_with("X"),
+              names_to = "length",
+              names_prefix = "X",
+              values_to = "CPUE") %>%
+ mutate_at("length", as.numeric) %>%
+ mutate(scientific_name = "Clupea harengus") %>%
+ rename("year"="Year")
+
+
+# sprat
+bal.sprat <- read.csv("data/raw_data/baltic_sea_raw/bal_sprat_data_raw_mich.csv")
+
+
+bal.sprat <- bal.sprat %>%
+ pivot_longer(cols = starts_with("X"),
+              names_to = "length",
+              names_prefix = "X",
+              values_to = "CPUE") %>%
+ mutate_at("length", as.numeric) %>%
+ mutate(scientific_name = "Sprattus sp")%>%
+ rename("year"="Year")
+
+
+# bind herring + sprat
+bal <- bind_rows(bal.herring, bal.sprat)
+names(bal)
+
+bal <- bal %>%
+ rename("cpue_number_per_hour"="CPUE",
+        "subarea" = "Rec") %>%
+ mutate(region = "baltic sea") %>%
+ select(-SD)
+
+# There is no quarterly data for bal, so set quarter = 0
+bal$quarter = 0
+bal$region <- "Baltic Sea"
+bal <- bal %>%
+ rename(species=scientific_name) %>%
+ select("region","year", "quarter","subarea",
+        "species","length","cpue_number_per_hour") %>%
+ mutate_at("subarea", as.character)
+
+```
+
+
+
+# Save Bal (herring + spart)
+```{r}
+
+write.csv(bal,file="data/raw_data/bal_raw_formatted.csv")
+
+```
+
+
+#--------- Eastern Bering Sea-------
+
+# Read data
+```{r}
+
+# group-read csvs of ebs data
+
+Path <- "/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/data/raw_data/ebs_nbs_paul_raw/"
+
+filenames <- list.files(path = Path,
+                       pattern = "ebs.*csv")
+
+filepath <- paste0(Path, filenames)
+
+ebs <- lapply(filepath, read.csv)
+
+ebs <- ebs %>% bind_rows() %>% 
+  select(LATITUDE, LONGITUDE,
+               SPECIES_NAME, COMMON_NAME,
+               LENGTH,YEAR,CPUE_LENGTH) %>% 
+  add_column(region ="EBS",.before = "LATITUDE") 
+  
+
+names(ebs) <- c("region","lat","lon","scientific_name",
+                "species", "length","year",
+                "cpue_number_per_hour")
+
+```
+
+# generate list of scientific_name & common name 
+```{r}
+
+ebs.species.list <- ebs %>% 
+  group_by(scientific_name, species) %>% 
+  tally() %>% 
+  select(scientific_name, species)
+
+# # save list
+# write.csv(ebs.species.list,
+#           file="data/Raw_Data/ebs_species_list.csv")
+
+```
+
+
+# Convert length from cm to mm
+```{r}
+
+ebs <- ebs %>% mutate(length_mm = length * 10) %>% 
+  select(-length) %>% 
+  rename(length = length_mm)
+
+  
+```
+
+
+# Grid the data into 1 x 0.5 
+```{r}
+
+# split lon
+#1 separate interger and decimal of longitude coordinates
+lon <- do.call(rbind, strsplit(as.character(ebs$lon),"\\."))
+#2 add interger and decimal columns into ebs tibble
+ebs <- bind_cols (ebs, as_tibble(lon))
+#3 rename interger and decimal columns in ebs
+ebs <- ebs %>% rename(lon_int = V1, lon_dec = V2)
+
+# split lat
+#1 round latitudinal coordinates
+ebs <- ebs %>% mutate(across(lat, round, 2))
+
+#2 separate interger and decimal of longitude coordinates
+lat <- do.call(rbind, strsplit(as.character(ebs$lat),"\\."))
+
+#3 add interger and decimal columns into ebs tibble
+ebs <- bind_cols (ebs, as_tibble(lat))
+
+#4 rename interger and decimal columns in ebs
+ebs <- ebs %>% rename(lat_int = V1, lat_dec = V2)
+
+# 5 assign lat_dec > 50: 1, lat_dec <50:2
+ebs <- ebs %>% mutate(lat_dec_50 =
+                 replace(lat_dec, lat_dec >50, "1")) %>% mutate(lat_dec_50 = replace(lat_dec_50, lat_dec < 50, "2"))
+
+#6 bind interger and decimal (either 1 or 2)
+ebs <- ebs %>% 
+  mutate(lat_new=paste(lat_int,lat_dec_50,sep=".")) %>% 
+  mutate_at("lat_new", as.numeric)
+
+```
+
+
+# aggregate CPUE based on 1 x 0.5 grid
+Taking the mean of cpue_number_per_hour of all survey points within a grid 
+```{r}
+
+ebs.grid <- ebs %>% 
+  ungroup() %>% 
+  group_by(region, scientific_name, length,
+           species, year, lon_int, lat_new) %>% 
+  summarise(cpue_number_per_hour = mean(cpue_number_per_hour),
+            .groups = 'drop') 
+
+# name the grids (there are 184 grids)
+subarea <- ebs.grid %>% group_by(lon_int, lat_new) %>% tally() %>% select(lon_int, lat_new) 
+
+subarea$subarea = c(1:184)
+
+ebs <- full_join(ebs.grid, subarea, by = c("lon_int", "lat_new"))
+
+names(ebs)
+
+ebs <- ebs %>% ungroup() %>% dplyr::select(-c("lat_new","lon_int"))
+
+# check survey period (1982-2019)
+ebs %>% ungroup() %>% 
+  group_by(year) %>% 
+  tally()
+
+```
+
+# Edit column name & quarter data
+```{r}
+ebs <- ebs %>% select(-species)
+names(ebs)
+
+#------- EBS
+ebs$quarter = 0
+ebs$region <- "Eastern Bering Sea"
+
+ebs <- ebs %>%
+  rename(species=scientific_name) %>%
+  select("region","year", "quarter","subarea",
+         "species","length","cpue_number_per_hour") %>%
+  mutate_at("subarea", as.character)
+
+```
+
+
+# check rare species
+```{r}
+
+ebs %>% 
+  # take sum of cpue from all lengths of all years
+  group_by(species) %>% 
+  summarise(cpue_all_length_year = 
+              sum(cpue_number_per_hour)) %>% 
+  arrange(cpue_all_length_year)
+
+```
+
+# Save EBS
+```{r}
+write.csv(ebs,file="data/Raw_Data/ebs_raw_formatted.csv")
+
+```
+
+
+

@@ -1,0 +1,401 @@
+---
+title: "06_Nlengthgroup_OverlapCalculating"
+output: html_document
+---
+#Set working directory
+```{r setup}
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+
+knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+```
+
+library
+```{r}
+
+library("tidyverse")
+
+
+```
+
+#------------Functions--------------------
+#<Function>: Get subarea infos for Length Pair
+*Required Input Dataset: cpue.length.subarea.yearqua*
+
+step1. calculate cpue_length_yearqua
+step2. select columns & filter for target length group for given pair 
+step3. count lengthgroup-specific range_size in each year
+step4. rename columns with specific ID within given pair
+
+*var: names waiting for being changed to pair-specific ID format
+```{r}
+get_lengthgroup_subarea_infos <- function(cpue.length.subarea.yearqua, group.num, pair.id){
+    
+  var <- c("pair_id","cpue_length_subarea_yearqua","cpue_length_yearqua","range_size")
+  pair.id.append <- ifelse(pair.id=="x","_x","_y")
+  
+  cpue.group <- cpue.length.subarea.yearqua %>%
+      #step1.
+      group_by(region,species,yearqua,length_group) %>%
+      mutate(cpue_length_yearqua=sum(cpue_length_subarea_yearqua)) %>%
+      relocate(cpue_length_yearqua,.after="cpue_length_subarea_yearqua") %>%
+      #step2.
+      select(region,species, yearqua, subarea, 
+             length_group, cpue_length_subarea_yearqua, cpue_length_yearqua) %>%
+      group_by(region,species,yearqua) %>%                 
+      filter(length_group == group.num & cpue_length_subarea_yearqua>0) %>%
+      #step3.
+      mutate(range_size = n_distinct(subarea)) %>%
+      #step4.
+      rename("pair_id" = "length_group") %>% 
+      rename_with(.fn = ~paste0(., pair.id.append), .cols = all_of(var))
+   
+  return(cpue.group)
+}
+
+
+```
+
+
+#<Function>: get union infos
+required input dataset: cpue.group.x & cpue.group.y
+
+step1. derive both.groups.exist.year, then discard year records where only 1 group was surveyed
+       (acheived by taking inner_join between cpue.group and both.groups.exist.year)
+       
+step2. take distribution unions, then count union subareas during both.groups.exist.year  
+step3. return data (depends on pair.id)
+
+```{r}
+get_union_infos <- function(cpue.group.x,cpue.group.y,pair.id){
+  #step1.
+  subset.var <-c("region","species","yearqua")
+  both.groups.exist.year <- intersect(cpue.group.x[,subset.var],cpue.group.y[,subset.var])
+
+  #@HHT add by = c("region", "species", "yearqua")
+  cpue.group.x <- inner_join(both.groups.exist.year,cpue.group.x,by = c("region", "species", "yearqua"))
+  cpue.group.y <- inner_join(both.groups.exist.year,cpue.group.y,by = c("region", "species", "yearqua"))
+
+  #step2.
+  subset.var2 <-c("region","species","yearqua","subarea")
+  union <- union(cpue.group.x[,subset.var2], cpue.group.y[,subset.var2]) %>%        
+    #@HHT 2023.05.30 I added .group='drop" to mute error message
+    group_by (region,species,yearqua) %>%                                  #
+    summarise(num_union=n_distinct(subarea),.groups = 'drop')
+  
+  #step3.
+  
+  #@HHT I added by = c("region", "species", "yearqua") to mute error message
+  if(pair.id == "x"){
+     cpue.group.x <- left_join(cpue.group.x, union,
+                               by = c("region", "species", "yearqua"))
+    return(cpue.group.x)
+  }
+  
+  if(pair.id == "y"){
+    cpue.group.y <- left_join(cpue.group.y, union,by = c("region", "species", "yearqua"))
+    return(cpue.group.y)
+  }
+  
+}
+
+```
+
+
+#<Function>: get intersect infos
+step1. get subarea records within cpue.group.x & cpue.group.y during both.groups.exist.year via full_join
+*note that in some years, both groups shared no overlapping subarea (intersect = 0), although they did exist*
+*some values would become NA after taking full_join, since two groups did not co-occur there.*
+*so, in "step.3" we need to replace the NA values with true values showing in cpue.group.x/y*
+
+step2. check whether both groups co-occurred in same subareas (overlap_region = 1 or 0) 
+
+step3. replace NA into correct values in each column
+       step3-(1) pair_id_x/y
+       step3-(2) cpue_length_subarea_yearqua_x/y
+       step3-(3) cpue_length_yearqua_x/y & range_size_x/y
+      
+step4. derive num_intersect & cpue_length_intersect_yearqua_x/y
+step5. reorder columns
+```{r}
+get_intersect_infos <- function(cpue.group.x,cpue.group.y,i){
+  #step1
+  cpue.group.xy <- full_join(cpue.group.x,cpue.group.y,
+                       by=c("region","species","yearqua","subarea","num_union"))
+  #step2
+  cpue.group.xy$overlap_region <- ifelse(is.na(cpue.group.xy$cpue_length_subarea_yearqua_x)|
+                                         is.na(cpue.group.xy$cpue_length_subarea_yearqua_y), 0, 1)
+  
+  #step3-(1)
+  cpue.group.xy$pair_id_x <- combn(1:num.combn, 2)[,i][1]
+  cpue.group.xy$pair_id_y <- combn(1:num.combn, 2)[,i][2]
+  
+  #step3-(2)
+  cols <- c("cpue_length_subarea_yearqua_x","cpue_length_subarea_yearqua_y")
+  cpue.group.xy[cols][is.na(cpue.group.xy[cols])] <- 0
+  #step3-(3)
+  cpue.group.xy <- cpue.group.xy %>%
+    group_by(region,species,yearqua) %>%
+    mutate_at(vars(cpue_length_yearqua_x,cpue_length_yearqua_y,range_size_x,range_size_y),
+              ~ifelse(all(is.na(.))==TRUE,0,na.omit(.)[1]))
+  
+  ##step4
+  cpue.group.xy <- cpue.group.xy %>%
+    group_by(region,species,yearqua) %>%
+    mutate(num_intersect=sum(overlap_region),
+           cpue_length_intersect_yearqua_x= 
+            ifelse(num_intersect==0,0,sum(cpue_length_subarea_yearqua_x[which(overlap_region==1)])),
+           cpue_length_intersect_yearqua_y= 
+            ifelse(num_intersect==0,0,sum(cpue_length_subarea_yearqua_y[which(overlap_region==1)])))
+  #step5
+  cpue.group.xy <- cpue.group.xy %>%
+    relocate(overlap_region,.after = "subarea") %>%
+    relocate(num_intersect,.before = "num_union") %>%
+    relocate(cpue_length_intersect_yearqua_x,.before = "cpue_length_yearqua_x") %>%
+    relocate(cpue_length_intersect_yearqua_y,.before = "cpue_length_yearqua_y")
+  
+  return(cpue.group.xy)
+  
+}
+```
+
+
+#<function>: get overlap indices
+step1. derive precursors for overlap indices:
+       prop_cpue_intersect_x/y & 
+       prop_cpue_length_subarea_yearqua_x/y/xy &
+       sum_prop_cpue_length_subarea_yearqua_x/y_square
+       
+step2. derive overlap indices:
+       area_overlap/overlap_abun_weighted (regional scale indices)
+       overlap_bhat/schoener/local_collocation (grid-based indices)
+       
+step3. remove unecessary variables and subset dataframe
+
+```{r}
+
+get_overlap_indices <- function(cpue.group.xy){
+  #step1
+  cpue.group.xy <- cpue.group.xy %>%
+    mutate(prop_cpue_intersect_x = cpue_length_intersect_yearqua_x / cpue_length_yearqua_x,
+           prop_cpue_intersect_y = cpue_length_intersect_yearqua_y / cpue_length_yearqua_y) #%>%
+    #mutate(prop_cpue_length_subarea_yearqua_x = cpue_length_subarea_yearqua_x / cpue_length_yearqua_x,
+    #      prop_cpue_length_subarea_yearqua_y = cpue_length_subarea_yearqua_y / cpue_length_yearqua_y,
+    #      prop_cpue_length_subarea_yearqua_xy = sqrt(prop_cpue_length_subarea_yearqua_x *        
+    #                                                 prop_cpue_length_subarea_yearqua_y)) %>%
+    #group_by(region,species,yearqua) %>%
+    #mutate(sum_prop_cpue_length_subarea_yearqua_x_square = sum(prop_cpue_length_subarea_yearqua_x^2),
+    #       sum_prop_cpue_length_subarea_yearqua_y_square = sum(prop_cpue_length_subarea_yearqua_y^2))
+    
+    #step2
+    cpue.group.xy <- cpue.group.xy %>%
+    mutate(area_overlap =  num_intersect / num_union,
+          overlap_abun_weighted = sqrt(prop_cpue_intersect_x * prop_cpue_intersect_y)) #%>%
+      
+    #group_by(region,species,yearqua) %>%
+    #mutate(overlap_bhat = sum(prop_cpue_length_subarea_yearqua_xy),
+    #      overlap_schoener=1-sum(0.5*abs(prop_cpue_length_subarea_yearqua_x-prop_cpue_length_subarea_yearqua_y)),
+     #     overlap_local_collocation=sum(prop_cpue_length_subarea_yearqua_xy^2) / 
+     #      sqrt(sum_prop_cpue_length_subarea_yearqua_x_square*sum_prop_cpue_length_subarea_yearqua_y_square)) 
+
+  #step3
+  cpue.group.xy <- cpue.group.xy %>%
+    ungroup() %>%
+    select(-subarea,-overlap_region,
+           -cpue_length_subarea_yearqua_x,-cpue_length_subarea_yearqua_y#,
+           #-prop_cpue_length_subarea_yearqua_x,-prop_cpue_length_subarea_yearqua_y,
+           #-prop_cpue_length_subarea_yearqua_xy,
+           #-sum_prop_cpue_length_subarea_yearqua_x_square,
+           #-sum_prop_cpue_length_subarea_yearqua_y_square
+           ) %>%
+    unique()
+  
+  return(cpue.group.xy)
+}
+```
+
+#<Function>: get species-level mean overlap infos by averaging all paired ovelap infos
+```{r}
+
+get_species_level_mean_overlap<- function(overlap.infos.all.pair){
+  
+  overlap.infos.all.pair <- overlap.infos.all.pair %>% 
+    group_by(region,species,yearqua) %>%
+    mutate(mean_intersect = mean(num_intersect),
+           mean_union = mean(num_union),
+           mean_oa = mean(area_overlap),
+           mean_ow = mean(overlap_abun_weighted)#,
+           #mean_overlap_bhat = mean(overlap_bhat),
+           #mean_overlap_schoener=mean(overlap_schoener),
+           #mean_overlap_local_collocation=mean(overlap_local_collocation)
+           ) 
+    
+    return(overlap.infos.all.pair)
+}
+
+```
+
+#<Function>: add_overlap_infos_to_cpue_year (Add Species-level mean overlap index to cpue.year)
+```{r}
+
+add_overlap_infos_to_cpue_year <- function(overlap.infos.all.pair,cpue.year){
+
+    overlap.infos.all.pair <- overlap.infos.all.pair %>%
+      select(region,species,yearqua,
+             mean_intersect,mean_union,
+             mean_oa,mean_ow) %>%
+      group_by(region,species,yearqua) %>%
+      unique()
+
+    cpue.year <- inner_join(overlap.infos.all.pair, cpue.year, 
+                    by = c("region","species","yearqua"))
+    
+    return(cpue.year)
+
+}
+
+```
+
+#<Function>: save cpue.year/cpue.pair
+```{r}
+
+save_cpue_year_cpue_pair <- function(cpue.year,cpue.pair,group.num,cutoff){
+  
+  save(cpue.year,cpue.pair,
+       file = paste0("data/overlap_data/lengthgroup_specific/",group.num,
+                     "_lengthgroup/with_extreme/cutoff_",cutoff,"/",group.num,"_lengthgroup_yearly_overlap_infos.RData"))
+  
+  print(paste0(group.num,"_length_group_yearly_overlap_infos.RData","  is saved."))
+  
+}
+```
+
+#------------Overlap compilation--------------------
+*Run above function with loop*
+#<With Loop>: Compile overlap data (cpue.year/cpue.pair)
+
+@HHT 2022.03.23----------------------
+I have many messages: 
+`summarise()` has grouped output by 'region', 'species'. You can override using the `.groups` argument.
+Joining, by = c("region", "species", "yearqua")
+
+This prevents from running the script. Maybe I need to update my R or package---------
+
+
+-----
+`summarise()` has grouped output by 'region', 'species'. You can override using the `.groups` argument.
+Joining, by = c("region", "species", "yearqua")
+Joining, by = c("region", "species", "yearqua")
+Joining, by = c("region", "species", "yearqua")
+`summarise()` has grouped output by 'region', 'species'. You can override using the `.groups` argument.
+Joining, by = c("region", "species", "yearqua")
+-----
+
+
+```{r}
+group.num <- seq(5,10,1)
+cutoff <- c(0.1,1,3)
+
+for ( code in 1:length(group.num)) {
+  
+  for ( k in 1:length(cutoff)) {
+  
+  load(paste0("data/initial_data/lengthgroup_specific/",group.num[code],"_lengthgroup/with_extreme/cutoff_",
+              cutoff[k],"/",group.num[code],"_lengthgroup_cpue_compiled.RData"))
+  
+  num.combn = group.num[code]  
+
+  cpue.pair.output <- vector(mode = "list")
+  
+  for (i in 1 : ncol(combn(1:num.combn,2)) ){
+    
+    x <- combn(1:num.combn, 2)[,i][1]
+    y <- combn(1:num.combn, 2)[,i][2]
+    
+    cpue.group.x <- get_lengthgroup_subarea_infos(cpue.length.subarea.yearqua, 
+                                                   group.num = x, pair.id = "x")
+    cpue.group.y <- get_lengthgroup_subarea_infos(cpue.length.subarea.yearqua, 
+                                                   group.num = y, pair.id = "y")
+    
+    cpue.group.x <- get_union_infos(cpue.group.x,cpue.group.y, pair.id = "x")
+    cpue.group.y <- get_union_infos(cpue.group.x,cpue.group.y, pair.id = "y")
+    
+    cpue.group.xy <- get_intersect_infos(cpue.group.x,cpue.group.y,i)
+    
+    cpue.group.xy <- get_overlap_indices(cpue.group.xy)
+
+    cpue.pair.output[[i]] <- cpue.group.xy
+  
+    
+}  
+
+    overlap.infos.all.pair <- bind_rows(cpue.pair.output,.id = "pair_id")
+    
+    overlap.infos.all.pair <- get_species_level_mean_overlap(overlap.infos.all.pair)
+    
+    cpue.year <- add_overlap_infos_to_cpue_year(overlap.infos.all.pair, cpue.year)
+    cpue.pair <- overlap.infos.all.pair
+    save_cpue_year_cpue_pair(cpue.year, cpue.pair, group.num[code],cutoff[k])
+    
+  }
+
+}
+```
+
+*Run above function step by step*
+#<without loop>: Compile overlap data (cpue.year/cpue.pair) (5 lengthgroup case)
+```{r}
+group.num = 5
+cutoff = 1
+
+load(paste0("data/initial_data/lengthgroup_specific/",group.num,"_lengthgroup/with_extreme/cutoff_",cutoff,"/",group.num,"_lengthgroup_cpue_compiled.RData"))
+
+num.combn = group.num
+
+cpue.pair.output <- vector(mode = "list")
+
+for (i in 1 : ncol(combn(1:num.combn,2)) ){
+    
+    x <- combn(1:num.combn, 2)[,i][1]
+    y <- combn(1:num.combn, 2)[,i][2]
+    
+    cpue.group.x <- get_lengthgroup_subarea_infos(cpue.length.subarea.yearqua, 
+                                                   group.num = x, pair.id = "x")
+    cpue.group.y <- get_lengthgroup_subarea_infos(cpue.length.subarea.yearqua, 
+                                                   group.num = y, pair.id = "y")
+    
+    cpue.group.x <- get_union_infos(cpue.group.x,cpue.group.y, pair.id = "x")
+    cpue.group.y <- get_union_infos(cpue.group.x,cpue.group.y, pair.id = "y")
+    
+    cpue.group.xy <- get_intersect_infos(cpue.group.x,cpue.group.y,i)
+    
+    cpue.group.xy <- get_overlap_indices(cpue.group.xy)
+
+    cpue.pair.output[[i]] <- cpue.group.xy
+
+}  
+
+    overlap.infos.all.pair <- bind_rows(cpue.pair.output,.id = "pair_id") %>%
+      arrange(region,species,pair_id,yearqua)
+    overlap.infos.all.pair <- get_species_level_mean_overlap(overlap.infos.all.pair)
+    cpue.year <- add_overlap_infos_to_cpue_year(overlap.infos.all.pair, cpue.year) %>%
+      arrange(region,species,yearqua)
+    cpue.pair <- overlap.infos.all.pair
+    #save_cpue_year_cpue_pair(cpue.year, cpue.pair, group.num,cutoff)
+    
+    cpue.pair %>% filter(num_intersect==0) %>%
+    ungroup() %>%
+    group_by(species) %>%
+    summarise(num_pair_no_intersect=n())
+    
+```
+
+
+
+
+
+
+
+
+
+

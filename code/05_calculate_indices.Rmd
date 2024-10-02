@@ -1,0 +1,197 @@
+---
+title: "05_Nlengthgroup_RangeCompiling"
+output: html_document
+---
+#Set working directory
+```{r setup}
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+
+knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+```
+
+#library
+```{r}
+
+library("tidyverse")
+
+
+```
+
+#------------Functions--------------------
+#<Function>: Deriving cpue- and range-related indices for each length
+*Length-specific Prop_CPUE/Area_of_Distribution/Prop_Distribution within given species*
+
+Required Input dataset: cpue.length.subarea.yearqua
+Here we will create:
+(1) cpue_length_yearqua// (2) cpue_year// (3) Prop_CPUE_Length_Year// *Step 1. ~ Step 3.*  
+(4) num_subarea_all_length// (5) num_subarea_length// (6) prop_subarea_length *Step 4. ~ Step 7.*
+
+
+Step1. Create cpue_length_yearqua and Subset cpue.length.subarea.yearqua into Length-Specific data
+Step2. Derive cpue_year (Summed CPUE for each species, in each year)
+Step3. Derive Prop_CPUE_Length_Year (length-specific relative abundance in each year)
+
+Step4. Derive num_subarea_all_length (Species-specific home range in each year), count subareas with n_distinct()
+Step5. Derive num_subarea_length (Length-specific home range in each year) with n_distinct()
+Step6. Incorporate num_subarea_all_length & num_subarea_length into cpue.length.year
+Step7. Derive prop_subarea_length (Proportional occupation for lengthgroup, given the yearly home range of population)
+
+```{r}
+get_length_yearly_data <- function(cpue.length.subarea.yearqua.data){
+  
+  cpue.length.year <- cpue.length.subarea.yearqua.data %>%
+    #Step1.
+    group_by(region,species,yearqua,length_group) %>%
+    mutate(cpue_length_yearqua=sum(cpue_length_subarea_yearqua)) %>%
+    select(region,species, yearqua, length_group, cpue_length_yearqua) %>%
+    unique()
+
+  cpue.length.year <- cpue.length.year %>%
+    group_by(region,species,yearqua) %>%
+    #Step2.
+    mutate(cpue_year = sum(cpue_length_yearqua)) %>%
+    #Step3.
+    mutate(prop_cpue_length_year = cpue_length_yearqua / cpue_year)
+
+    
+  #Step4.
+  home.range.year <- cpue.length.subarea.yearqua.data %>%
+    group_by(region,species, yearqua) %>%
+    summarise(num_subarea_all_length=n_distinct(subarea))
+  
+  #Step5. 
+  num.subarea.length <- cpue.length.subarea.yearqua.data %>%
+    group_by(region,species, yearqua, length_group) %>%
+    summarise(num_subarea_length = n_distinct(subarea)) 
+
+  #Step6.
+  cpue.length.year <- left_join(cpue.length.year, num.subarea.length, 
+    by = c("region","species","yearqua","length_group"))
+  
+  cpue.length.year <- left_join(cpue.length.year, home.range.year, 
+    by = c("region","species","yearqua"))
+ 
+  #Step7.
+  cpue.length.year <- cpue.length.year %>%  
+    mutate(prop_subarea_length = num_subarea_length / num_subarea_all_length) %>% 
+    mutate(length_group = factor(length_group, levels=c("1","2","3","4","5","6","7","8","9","10")))
+
+  return(cpue.length.year)
+  
+}
+
+```
+
+
+#<Function>: Deriving cpue- and range-related indices for species
+Required Input dataset: cpue.length.year
+*Range-related indices also include Mean Proportional Occupation*
+
+Step1. Create (1) mean_prop_subarea ( arithmetic mean among all length ) 
+              (2) mean_num_subarea
+Step2. Subset data
+
+```{r}
+get_species_yearly_data <- function(cpue.length.year.data){
+ 
+  cpue.year <- cpue.length.year.data %>% 
+    group_by(region,species,yearqua) %>%
+     #Step1
+    mutate(mean_prop_subarea = mean(prop_subarea_length),
+           mean_num_subarea = mean(num_subarea_length)) %>%
+     #Step2
+    select(region,species,yearqua,cpue_year,num_subarea_all_length,
+           mean_prop_subarea,mean_num_subarea) %>%
+    unique()
+  
+}
+
+```
+
+#------------Range compilation--------------------
+#<With Loop>: Compiling 3 CPUE datasets for all length-groups (5~10)
+
+cpue.length.subarea.yearqua (*Note*)//cpue.length.year//cpue.year
+
+*Run above function with loop*
+Step1. Load and arrange cpue.length.subarea.yearqua data
+Step2. Compile cpue.length.year
+Step3. Compile cpue.year
+(suppressed)Step4. Arrange yearqua and Add Temp data to 3 CPUE datasets
+Step5. Save data
+
+*Note* The Input data is already sufficient for compiling geographic overlap (see Script 06) and 
+the Abundance-weighted range overlap will be compiled in Script 06 
+(See Add Intersect Infos & Get Overlap Infos) 
+```{r}
+
+group.num <- seq(5,10,1)
+cutoff <- c(0.1,1,3)
+
+
+for (i in 1:length(group.num)) {
+    
+    for (j in 1:length(cutoff)) {
+      
+      #Step1.
+      import.dir = paste0("data/initial_data/lengthgroup_specific/",group.num[i],
+                      "_lengthgroup/with_extreme/cutoff_",cutoff[j],"/",group.num[i],"_lengthgroup_denoise.csv")
+    
+      length.group.denoise <- read.csv(import.dir) 
+    
+      cpue.length.subarea.yearqua <- length.group.denoise %>% 
+        select(-X) %>% 
+        mutate_at("species",as.factor)
+
+      #Step2.~Step4.
+
+      cpue.length.year <- get_length_yearly_data(cpue.length.subarea.yearqua)
+      cpue.year <- get_species_yearly_data(cpue.length.year)
+
+      #Step5.
+      export.dir = paste0("data/initial_data/lengthgroup_specific/",group.num[i],
+                  "_lengthgroup/with_extreme/cutoff_",cutoff[j],"/",group.num[i],"_lengthgroup_cpue_compiled.RData")
+
+      save(cpue.length.subarea.yearqua, cpue.length.year, cpue.year, file = export.dir)
+
+      print(paste0("cpue data for length-group ",group.num[i]," was finished"))
+    }
+}
+```
+
+
+*Run above function step by step*
+#<without loop>: Compile 3 cpue datasets (5 lengthgroup case)
+Step1. Load and arrange cpue.length.subarea.yearqua data
+Step2. Compile cpue.length.year
+Step3. Compile cpue.year
+```{r}
+#Step1.
+length.group.denoise <- read.csv("data/initial_data/lengthgroup_specific/5_lengthgroup/with_extreme/cutoff_1/5_lengthgroup_denoise.csv")
+
+cpue.length.subarea.yearqua <- length.group.denoise %>% 
+  select(-X) %>% 
+  mutate_at("species",as.factor)
+
+#Step2.
+cpue.length.year <- get_length_yearly_data(cpue.length.subarea.yearqua)
+
+#Step3.
+cpue.year <- get_species_yearly_data(cpue.length.year)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

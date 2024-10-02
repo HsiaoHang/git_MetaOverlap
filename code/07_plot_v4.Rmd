@@ -1,0 +1,1561 @@
+---
+title: "07_plot"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+#----- Call data & house keeping
+
+# Setup
+```{r setup, class = "blue-outline"}
+
+knitr::opts_knit$set(root.dir = ("/Users/hsiaohang.tao/Dropbox/Academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/code/latest_code"))
+getwd()
+
+```
+
+
+# library
+```{r}
+
+library("lme4")
+library("lmerTest")
+library("tidyverse")
+library("purrr")
+library("broom")
+library("forcats")
+library("viridis")
+library("boot")
+library("nlme")
+library("MuMIn")
+library("gridExtra")
+library("RColorBrewer")
+library("lmtest")
+library("stats")
+library("cowplot")
+library("synchrony")
+library("dplyr")
+library("stats")
+library("FactoMineR")
+library("factoextra")
+library("readxl")
+library("rfishbase")
+library(boot)
+library(khroma)
+
+```
+
+
+# load rdata & house keeping
+```{r}
+
+load("/Users/hsiaohang.tao/Dropbox/Academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/data/overlap_data/lengthgroup_specific/5_lengthgroup/with_extreme/cutoff_1/5_lengthgroup_yearly_overlap_infos.RData")
+
+# rename sparttus
+cpue.year <- cpue.year %>% 
+  mutate(species = 
+           replace(species, 
+                   species == "Sprattus sp",
+                   "Sprattus sprattus"))
+```
+
+
+# load Beukhof_2019_TraitData & house keeping
+```{r}
+
+# read trait data
+trait.b <- read_xlsx("/Users/hsiaohang.tao/Dropbox/Academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/data/trait_data/Beukhof_2019_TraitData.xlsx",1)
+
+# rename
+trait.b <- trait.b %>% 
+  rename(# rename original "species" to species.orginal
+          species.orginal = species,
+        # rename taxon as "species"
+         species = taxon) 
+
+# remove reference columns
+name.ref <- names(dplyr::select(trait.b,contains("reference")))
+
+trait.b <- trait.b %>% dplyr::select(-c(all_of(name.ref),
+                                 family,
+                                 genus,
+                                 species.orginal,
+                                 taxonomic.rank))
+names(trait.b)
+
+```
+
+
+# load common name csv
+```{r}
+
+common.name <- read.table("/Users/hsiaohang.tao/Dropbox/Academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/data/common_name_data/a_common_name_all_stocks.csv", sep = ";", header = TRUE)
+
+```
+
+
+# (remove spatial overlap outliners)
+# @20230207 verity this chunk
+1. directly remove several time points when mean_oa <0.99 
+(logit mean_oa = 4.59)
+2. directly remove a swc point when mean_oa & mean_ow = 0
+
+2. Two Baltic species have extremely high overlap between size groups. Check if there is error in coding.
+```{r}
+
+# Found that both NS and SWC has Clupea harengus & Sprattus sprattus
+cpue.year %>% filter(species == "Clupea harengus") %>% 
+  group_by(region) %>% tally()
+
+cpue.year %>% filter(species == "Sprattus sprattus") %>% 
+  group_by(region) %>% tally()
+
+# check outliners from cpue.year
+cpue.year %>% 
+  dplyr::select(region, species, yearqua, mean_oa, mean_ow) %>% 
+  filter(mean_oa > 0.99) # logit(0.9)= 4.59 
+
+cpue.year %>% 
+  dplyr::select(region, species, yearqua, mean_oa, mean_ow) %>% 
+  filter(mean_oa == 0)
+
+# remove time point with mean_oa > 0.99
+cpue.year <- cpue.year %>% 
+  filter(mean_oa < 0.99,
+         mean_oa > 0) # logit(0.9)= 4.59 as outliners
+
+
+# check outliners from cpue.pair
+cpue.pair %>% dplyr::select(region, species, yearqua,
+                     pair_id_x, pair_id_y,
+                     area_overlap) %>% 
+  filter(area_overlap > 0.99)
+
+```
+
+
+# merge trait and abundance data, create tibble [trait]
+```{r}
+
+#----- 1 North Sea (LME = 22)
+#Extract species list 
+ns.list <- cpue.year %>% filter(region == "North Sea") %>%
+  group_by(species)  %>% tally() %>% dplyr::select(-n)
+
+# filter to species in sp.list
+ns <- inner_join(ns.list, trait.b, by = "species")
+ns %>% group_by(species) %>% tally() # check num of sp
+ns <- ns %>% filter(LME == 22) # all sp has ns info
+ns$region <- "North Sea"
+
+# There are two Agonus cataphractus records in trait.b,so removed one.
+ns <- ns[2:nrow(ns),]
+
+#----- 2 SWC (LME = 24)
+#Extract species list 
+swc.list <- cpue.year %>% filter(region == "Scottish West Coast") %>%
+  group_by(species) %>% tally() %>% dplyr::select(-n)
+
+# filter to species in sp.list
+swc <- inner_join(swc.list, trait.b, by= "species")
+swc %>% group_by(species) %>% tally() 
+swc <- swc %>% filter(LME == 24) # all sp has info
+swc$region <- "Scottish West Coast"
+
+
+#-----3 Baltic Sea (LME = 23)
+# Extract species list 
+bs.list <- cpue.year %>% filter(region == "Baltic Sea") %>%
+  group_by(species) %>% tally() %>% dplyr::select(-n)
+
+# filter to species in sp.list
+bs <- inner_join(bs.list, trait.b, by= "species")
+bs %>% group_by(species) %>% tally() 
+bs <- bs %>% filter(LME == 23) # all sp has info
+bs$region <- "Baltic Sea"
+
+#----- 4 Eastern Bering Sea (LME = 1)(FAO = 67 Northeast Pacific)
+#Extract species list 
+ebs.list <- cpue.year %>% 
+  filter(region == "Eastern Bering Sea") %>%
+  group_by(species) %>% 
+  tally() %>% 
+  dplyr::select(-n)
+
+# filter to species in sp.list
+ebs <- inner_join(ebs.list, trait.b, by= "species")
+ebs %>% group_by(species) %>% tally()
+ebs <- ebs %>% filter(LME == 1 & FAO == 67) # all sp has info
+ebs$region <- "Eastern Bering Sea"
+
+#----- Join all species of each region together
+trait <- rbind(ns, swc, bs, ebs)
+
+#----- remove unnessary columns
+trait <- trait %>% dplyr::select(-c(LME,FAO))
+
+```
+
+# add common name to [trait] & [cpue.year]
+```{r}
+
+# add common name 
+trait <- left_join(trait, common.name, by = c("species", "region"))
+
+trait <- trait %>% relocate(common_name, .after = region)
+
+cpue.year <- left_join(cpue.year, common.name, by = c("species", "region"))
+
+cpue.year <- cpue.year %>% relocate(common_name, .after = region)
+
+```
+
+
+
+# (Housekeeping [cpue.year])
+#@20240207 verify this chunk
+*Scottish West Coast	Gadus morhua has mean_area_overlap =0 in 2006*
+```{r}
+
+#1 Clean: Two Baltic species have mean_oa & mean_ow = 1 for some years, so we can't do logit transform. Changed 1 to 0.9999.
+
+cpue.year <- cpue.year %>% 
+  mutate(mean_oa = replace(mean_oa, 
+                           mean_oa == 1, 
+                           0.9999),
+         mean_ow = replace(mean_ow, 
+                           mean_ow == 1, 
+                           0.9999),
+         mean_oa = replace(mean_oa, 
+                           mean_oa == 0, 
+                           0.0001),
+         mean_ow = replace(mean_ow, 
+                           mean_ow == 0, 
+                           0.0001))
+
+
+#2 create logit MSO and log CPUE
+cpue.year <- cpue.year %>% 
+  mutate(logit_mean_oa = 
+           logit(mean_oa),
+         log_cpue_year = log(cpue_year),
+         logit_mean_ow = 
+           logit(mean_ow)) 
+
+
+#3 scale year
+fun_scale <- function(x){
+  (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
+}
+
+cpue.year <- cpue.year %>% 
+  separate(yearqua, into = c("year","quarter")) 
+  
+cpue.year <- cpue.year %>% 
+  mutate_at("year", as.numeric) %>% 
+  mutate_at("quarter", as.numeric) %>% 
+  mutate(scale_year = fun_scale(year)) 
+
+```
+
+
+# summary: list of stocks
+```{r}
+
+# stock list by region
+cpue.year %>% group_by(region,species) %>% tally()
+
+# number of stocks per region
+# 27 NS, SWC 19,BAL 2, EBS 8 
+cpue.year %>% group_by(region) %>% 
+  summarise(number_species = n_distinct(species))
+
+# total number of stocks: 56
+cpue.year %>% group_by(region, species) %>% 
+  tally()
+
+# total number of species: 38
+cpue.year %>% group_by(species) %>% 
+  summarise(number_species = n_distinct(species))
+
+```
+
+
+# check if selected NS fish has data in all years  
+```{r}
+
+cpue.year %>% group_by(region, common_name) %>% 
+  tally()
+
+# only Angler has 36 time points, other populations have 38 time points
+cpue.year %>% filter(common_name == "Angler")
+# year 2012, 1988 are missing
+
+```
+
+
+# [Table S1] create population trait table 
+```{r}
+
+
+(trait.table <- trait %>% 
+  dplyr::select(common_name,species, region, growth.coefficient,
+         age.maturity,age.max,length.infinity,
+         length.max,fecundity) %>% 
+  arrange(growth.coefficient) %>% 
+  mutate(growth.coefficient = round(growth.coefficient, 2),
+         age.maturity = round(age.maturity, 2),
+         age.max = round(age.max, 0),
+         length.infinity = round(length.infinity,0),
+         length.max = round(length.max, 0),
+         fecundity= round(fecundity / 1000, 2)
+         ))
+  
+
+
+# trait.table <- trait %>% 
+#   dplyr::select(common_name, species,growth.coefficient) %>% 
+#   mutate(body_growth_rate = round(growth.coefficient, 2)) %>% 
+#   dplyr::select(common_name, species, body_growth_rate) 
+
+  
+write_excel_csv(trait.table,"/Users/hsiaohang.tao/Dropbox/Academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/output/0_figure_final/trait.table.csv")
+
+
+```
+
+
+#----- [Fig S2] Test SO difference between extreme & adjacent size group pairs
+
+##1 create [so.dd]
+extreme pair: group 1 and group 5
+adjacent pair: all other pairs
+```{r}
+
+# check id
+cpue.pair %>% 
+  group_by(pair_id_x, pair_id_y) %>% 
+  tally() 
+
+# create [cpue.pair.ext] , [cpue.pair.nea]
+cpue.pair.ext <- cpue.pair %>% 
+  filter(pair_id_x == 1 & pair_id_y == 5) %>%  # use &
+  # calculate mean cpue of x and y
+  mutate(mean_cpue_ext = mean(cpue_length_yearqua_x,cpue_length_yearqua_y)) %>% 
+  dplyr::select(region, species, yearqua, area_overlap, 
+                mean_cpue_ext) %>% 
+  rename('so_ext' = 'area_overlap')
+  
+cpue.pair.nea <- cpue.pair %>% 
+  filter(pair_id_x != 1 | pair_id_y != 5) %>% 
+  # take means of all adjacent pairs 
+  mutate(mean_cpue_nea = mean(cpue_length_yearqua_x,cpue_length_yearqua_y, trim = 0, na.action = na.omit)) %>% 
+  dplyr::select(region, species, yearqua, area_overlap,
+                mean_cpue_nea) %>% 
+  group_by(region, species, yearqua) %>% 
+  # take means of all area_overlap from all adj pairs
+  # use mutate function so not to drop cpue columns
+  mutate(mean_so_nea = mean(area_overlap)) 
+
+# bind two tibbles [cpue.pair.ext] , [cpue.pair.nea] to create so.dd
+so.dd <- inner_join(cpue.pair.ext, cpue.pair.nea,
+           by = c('region','species','yearqua')) 
+  
+so.dd <- so.dd %>% 
+  mutate(diff_so = so_ext - mean_so_nea) %>% 
+  mutate(percent_diff_so = (diff_so / mean_so_nea)*100)
+
+# bind two [cpue.pair.ext] , [cpue.pair.nea] to create [so.dd.long] as long form
+cpue.pair.ext <- cpue.pair.ext %>% 
+  mutate(so_group = 'ext') %>% 
+  rename('so' = 'so_ext')
+
+cpue.pair.nea <- cpue.pair.nea %>% 
+  mutate(so_group = 'adj') %>% 
+  rename('so' ='mean_so_nea')
+
+so.dd.long <- bind_rows(cpue.pair.ext, cpue.pair.nea)
+
+# join common name to so.dd.long
+so.dd.long <- left_join(so.dd.long, common.name, by = 
+            c('region','species'))
+
+# sort by growth, by adding growth.coefficient from [trait] to [so.dd.long] 
+so.dd.long <- inner_join(so.dd.long, trait.name.k, 
+           by = c('region','common_name'))
+
+so.dd.long$common_name <-
+  fct_reorder(so.dd.long$common_name,                                 desc(so.dd.long$growth.coefficient))
+
+# rename region
+so.dd.long <- so.dd.long%>% 
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      'Baltic Sea' ~ '3_Baltic Sea',
+      "Eastern Bering Sea" ~ "4_Eastern Bering Sea"))
+
+```
+
+##2 [Fig S2] plot SO of extreme and adjacent pairs
+```{r}
+
+ggplot(data= so.dd.long, 
+       aes(x = common_name, y = so,
+                             fill = so_group))+
+  geom_violin()+
+  facet_wrap(vars(region_reorder), ncol = 1,
+             labeller = labeller(region_reorder = 
+    c("1_North Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Baltic Sea" = "Baltic Sea",
+      "4_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  scale_fill_manual(values = c("#E69F00", "#56B4E9"))
+
+```
+
+
+#----- [Fig S3] Test if slower-growth fish has lower spatial overlap (SO) by running pair-specific regression SO ~ K
+
+## 1 create [cpue.pair.k], [cpue.pair.k.mean]
+```{r}
+
+#1 create [trait.k] with only k as a life history trait
+trait.k <- trait %>% 
+  dplyr::select(region, common_name,growth.coefficient)
+
+#2 add common name to cpue.pair 
+cpue.pair.k <- left_join(cpue.pair, common.name, 
+                         by = c("region","species"))
+
+#3 add k to [cpue.pair.k]
+cpue.pair.k <- left_join(cpue.pair.k, trait.k, 
+          by = c("region","common_name") )
+
+# take mean area overlap for each pair across year
+cpue.pair.k.mean <- cpue.pair.k %>% 
+  group_by(region, common_name, pair_id) %>% 
+  mutate(mean_area_overlap_all_year = 
+              mean(area_overlap),
+         sd_area_overlap_all_year= 
+           sd(area_overlap))
+
+```
+
+
+##2 model to extract slope store in [output.so.k]
+```{r}
+
+# nest by pair_id, region
+cpue.pair.k.mean.nest  <- cpue.pair.k.mean %>% 
+  dplyr::select(pair_id,region, common_name, 
+         growth.coefficient, 
+         mean_area_overlap_all_year) %>%
+  group_by(pair_id, region) %>% 
+  nest()
+
+# remove Baltic Sea populations because there are too few populations (only two populations) for regression.
+cpue.pair.k.mean.nest <- cpue.pair.k.mean.nest %>% 
+  filter(region != 'Baltic Sea')
+
+
+# create functions to run regression
+fun_trait_model_so <- function(df)gls( mean_area_overlap_all_year ~ 
+    growth.coefficient, 
+    na.action = na.omit, data = df)
+
+# create function to extract output
+fun_trait_extract_sep_so <-function(data){
+
+output.trait_so <- data %>% 
+  mutate(., slope = map_dbl(model, slope_fun),
+                intercept = map_dbl(model, intercept_fun),
+            lci = map_dbl(model, ci_lower_fun),
+            uci = map_dbl(model, ci_upper_fun),
+            p = map_dbl(model, p_value_fun)) %>%
+  dplyr::select(pair_id,region, intercept, slope,lci, uci, p)} 
+
+# apply two functions
+output.so.k <- cpue.pair.k.mean.nest %>% 
+  mutate(model = purrr::map(data, fun_trait_model_so))
+
+output.so.k <- fun_trait_extract_sep_so(output.so.k)
+
+
+# assign p-sig
+output.so.k <- output.so.k %>% 
+  mutate(p_sig = replace(p, p<0.05,"sig")) %>% 
+  mutate(p_sig = replace(p_sig, p > 0.05, "sig-non"))%>% 
+  relocate(p_sig,.after = "p")
+
+```
+
+
+##3 [fig S3 (a)] 
+```{r}
+
+# re-order region
+cpue.pair.k.mean <- cpue.pair.k.mean %>% 
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      "Eastern Bering Sea" ~ "3_Eastern Bering Sea"))
+
+
+# plot only pair 1-5 for demonstration
+cpue.pair.k.mean %>%
+  filter(region != 'Baltic Sea') %>% 
+  filter(pair_id =="4") %>% 
+ggplot(.,aes(x = growth.coefficient,
+                 y = mean_area_overlap_all_year))+
+  geom_point(size = 1.5, color = '#00C2F9')+
+  geom_smooth(method = 'lm', se= T,
+              size = 0.8, color = 'black')+
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank())+
+  facet_wrap(vars(region_reorder), ncol = 4,
+             labeller = labeller(region_reorder = 
+    c("1_North Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  ylab("spatial overlap")+
+  ggtitle('group pair 1 & 5')
+
+```
+
+
+##4 [fig S3 (b)] draw forest plot
+```{r}
+
+# add add <region_reorder> & <group_pair> to [output.so.k]
+output.so.k <- output.so.k %>% 
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North_Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      "Eastern Bering Sea" ~ "3_Eastern Bering Sea")) %>%
+  mutate_at('pair_id', as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+# forest plot
+output.so.k %>% 
+  mutate_at('group_pair', as.factor) %>%
+  ggplot(., 
+         aes(y = group_pair, x = slope))+
+  geom_point(shape = 16, aes(color = group_pair),
+             size = 2)+
+  geom_linerange(aes(xmin=lci, xmax=uci,
+                     linetype = p_sig),
+                 size = 0.5)+
+  facet_wrap(vars(region_reorder), ncol = 4,
+             labeller = labeller(region_reorder = 
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank()) +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, size=0.3, linetype = 'solid')+
+  xlab('slope and CI of SO ~ K')+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  scale_y_discrete(limits=rev)
+
+```
+
+
+##5 plot SO-K relationship by pair 
+```{r}
+
+# create [line.type], for assigned line types 
+slope.pair.line <- ifelse(slope.pair$p_sig =="sig", 
+                               "solid", "dashed")
+
+# plot all pairs
+cpue.pair.k.mean %>%
+ggplot(.,aes(x = growth.coefficient,
+                 y = mean_area_overlap_all_year))+
+  geom_point(aes(color = pair_id), size = 0.1)+
+  geom_smooth(method = 'lm', se= F, aes(color = pair_id),
+              size = 0.4)+
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank())+
+  facet_wrap(vars(region), ncol = 3)+
+  ylab("spatial overlap")+
+  #ylim(-3, 5)+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))
+
+cpue.pair.k.mean <- cpue.pair.k.mean %>% 
+  mutate(common_name = 
+           replace(common_name, 
+                   species == "Sprattus sp",
+                   'Sprat'))
+
+```
+
+
+#-----[Fig S4] forest plot pair-specific spatial overlap
+
+# [Fig S4] prepare [cpue.pair.k.mean.plot] and create forest plot
+```{r}
+
+# prepare tibble: summarise mean_so & sd_so by taking the mean  from 10 pairs. 
+cpue.pair.k.mean.plot <- cpue.pair.k.mean %>% 
+  dplyr::select(pair_id, region, common_name,
+                mean_area_overlap_all_year,
+                sd_area_overlap_all_year,
+                growth.coefficient) %>% 
+  group_by(pair_id, region,common_name, growth.coefficient) %>% 
+  summarise(mean_so_across_year = mean(mean_area_overlap_all_year),
+            sd_so_across_year = mean(sd_area_overlap_all_year)) %>% mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      'Baltic Sea' ~ '3_Baltic Sea',
+      "Eastern Bering Sea" ~ "4_Eastern Bering Sea"))
+
+
+cpue.pair.k.mean.plot <- cpue.pair.k.mean.plot %>% 
+  mutate_at('pair_id',as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+
+cpue.pair.k.mean.plot$common_name <-
+  fct_reorder(cpue.pair.k.mean.plot$common_name,                                 desc(cpue.pair.k.mean.plot$growth.coefficient))
+
+
+# forest plot
+cpue.pair.k.mean.plot <- cpue.pair.k.mean.plot %>% 
+  mutate(across(where(is.factor), ~replace(., is.na(.), 0)))
+
+cpue.pair.k.mean.plot %>% 
+ggplot(data=., 
+       aes(y=common_name, x= mean_so_across_year)) +
+  geom_linerange(aes(
+    xmin= mean_so_across_year - sd_so_across_year, 
+    xmax= mean_so_across_year + sd_so_across_year,
+    alpha = 0.5, color = group_pair),
+                 position=position_jitter(w=0, h=0.25))+ 
+  facet_wrap(vars(region_reorder), ncol = 4)+
+  # geom_point(shape = 16,size = 0.01,
+  #            aes(color = group_pair)) + 
+  theme_bw()+
+  guides(color = guide_legend(reverse=TRUE))+
+  #theme(legend.position = "none")+
+  #geom_vline(xintercept = 0, linetype = 'dashed', size = 0.3)+
+  xlab('range of spatial overlap (mean +- se)')+ ylab('')+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))
+
+
+```
+
+
+#-----[Fig 2] within population: show pair-specific beta
+
+#1 prepare [pair] to model slope
+#(check why sprat has  pair_id= 10 (size 4 & 5) which SO of all years = 1) 
+```{r}
+
+# create [pair] from [cpue.pair]
+pair <- cpue.pair %>% 
+  mutate_at('pair_id', as.numeric) %>% 
+  separate(yearqua, into = c("year", "qua")) %>% 
+  rename('cpue_x' = 'cpue_length_yearqua_x',
+         'cpue_y' = 'cpue_length_yearqua_y',
+         'so' = 'area_overlap')
+
+# add group pair name
+pair <- pair %>% 
+  mutate_at('pair_id',as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+# add common name 
+pair <- pair %>% 
+  mutate(species = 
+           replace(species, 
+                   species == "Sprattus sp",
+                   "Sprattus sprattus"))
+
+pair <- left_join(pair, common.name, by = c("species", "region"))
+
+
+# calculate mean cpue of x and y
+pair <- pair %>% 
+  mutate(mean_cpue = (cpue_x + cpue_y)/2,
+         log_mean_cpue = log(mean_cpue)) 
+  
+  
+# prepare data for logit transformation 
+pair <- pair %>% 
+  mutate(so = replace(so, so == 1, 0.9999),
+         so = replace(so, so == 0, 0.0001),
+         logit_so = logit(so)) 
+
+# scale year
+fun_scale <- function(x){
+  (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
+}
+
+pair <- pair %>% 
+  mutate_at("year", as.numeric) %>%
+  mutate(scale_year = fun_scale(year)) 
+
+
+#2 for Baltic Sea sprat pair_id= 10 (size 4 & 5) which SO of all years = 1, replace SO by NA
+
+sprat.baltic.pair10 <- pair %>%
+  filter(region == 'Baltic Sea' & common_name =='Sprat'& pair_id == '10') 
+
+sprat.baltic.pair10 <- sprat.baltic.pair10 %>%
+  mutate(logit_so = replace_na(logit_so, 0.9999)) %>%
+  mutate_at('logit_so', as.numeric)
+
+pair.remove.sprat <- pair %>%
+  filter(region != 'Baltic Sea' | common_name !='Sprat'| pair_id != '10')
+
+pair <- bind_rows(pair.remove.sprat, sprat.baltic.pair10)
+
+pair <- pair %>% filter(region != 'Baltic Sea' | common_name !='Sprat' | pair_id != '10')
+
+```
+
+
+#2. prepare [pair.nest] for applying functions
+```{r}
+
+pair.nest <- pair %>% 
+  ungroup() %>% 
+  dplyr::select(pair_id, region, common_name, 
+         scale_year, 
+         log_mean_cpue,
+         logit_so) %>%
+  group_by(pair_id, region, common_name) %>% 
+  nest()
+
+```
+
+
+#3. create function to model SO~abundance for each pair, store in [mod.data.pair]
+```{r}
+
+# create the function
+fun_pair_slope <- function(df)gls(logit_so ~ 
+    log_mean_cpue + scale_year, 
+  na.action = na.omit, data = df)
+
+# run the function
+mod.data.pair <- pair.nest %>% 
+  mutate(model = purrr::map(data, fun_pair_slope))
+
+```
+
+
+#4. create function to extract slope & CI and run, from [mod.data.pair], store in [output.pair]
+
+```{r}
+
+# functions to extract slope & CI from model
+slope_fun <- function(mod)coefficients(mod)[[2]]
+ci_lower_fun <- function(mod) confint(mod)[2,1]
+ci_upper_fun <- function(mod) confint(mod)[2,2]
+p_value_fun <- function(mod)summary(mod)$tTable[2,4]
+resid_fun <- function(mod)resid(mod)
+AIC_fun <- function(mod)AIC(mod)
+intercept_fun <- function(mod)coefficients(mod)[[1]]
+
+fun_extract_mod <-function(data){
+  output <- data %>% 
+  dplyr::mutate(., slope = map_dbl(model, slope_fun),
+            lci = map_dbl(model, ci_lower_fun),
+            uci = map_dbl(model, ci_upper_fun),
+            p = map_dbl(model, p_value_fun)) %>%
+  dplyr::select(pair_id, region, common_name, slope, lci, uci, p)
+} 
+
+# apply functions
+output.pair <- fun_extract_mod(mod.data.pair)
+
+```
+
+
+
+# 5 plot beta of each pair for each population (figure not used in the manuscript)
+```{r}
+
+output.pair %>% 
+  mutate_at('pair_id', as.factor) %>% 
+ggplot(., aes(x = pair_id, y = slope))+
+  geom_point(size = 0.1) +
+  facet_wrap(vars(region,common_name))+
+  theme_bw()+
+  geom_hline(yintercept = 0)
+  
+```
+
+
+#6 plot [Fig 2b]: beta for all populations per region 
+```{r}
+
+# prepare [output.pair] for plot
+## 1 add p_sig
+output.pair <- output.pair %>% 
+  mutate(p_sig = replace(p, p<0.05,"sig")) %>% 
+  mutate(p_sig = replace(p_sig, p > 0.05, "sig-non"))%>% 
+  relocate(p_sig,.after = "p") %>% 
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      'Baltic Sea' ~ '3_Baltic Sea',
+      "Eastern Bering Sea" ~ "4_Eastern Bering Sea"))
+
+## 2 add trait to reorder common_name
+trait.name.k <- trait %>% 
+  dplyr::select(region, common_name, growth.coefficient)
+
+output.pair <- inner_join(output.pair, trait.name.k, 
+           by = c('region','common_name'))
+
+output.pair$common_name <-
+  fct_reorder(output.pair$common_name,                                 desc(output.pair$growth.coefficient))
+
+
+# add column group_pair
+output.pair <- output.pair %>% 
+  mutate_at('pair_id',as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+output.pair %>% 
+ggplot(data=., 
+       aes(y=common_name, x=slope)) +
+  geom_linerange(aes(xmin= lci, xmax= uci, alpha = 0.5, 
+                     color = group_pair,
+                     linetype = p_sig),
+                 position=position_jitter(w=0, h=0.25))+ 
+  facet_wrap(vars(region_reorder), ncol = 4,
+             labeller = labeller(region_reorder = 
+    c("1_North Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Baltic Sea" = "Baltic Sea",
+      "4_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  geom_point(shape = 16,size = 0.01,
+             aes(color = group_pair)) + 
+  theme_bw()+
+  guides(color = guide_legend(reverse=TRUE))+
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, linetype = 'dashed', size = 0.3)+
+  xlab('beta SO +- se')+ ylab('')+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  xlim(-2, 4)+
+  geom_jitter(aes(color = group_pair),
+              width = 0.05, height = 0.25)
+ 
+```
+
+
+#7. plot [Fig 2a]:example population for each region
+
+```{r}
+
+# plot function
+function_plot_example <- function(data, ggtitle){
+  ggplot(data = data, 
+       aes(x = log_mean_cpue, 
+           y = logit_so)) +
+  geom_point(aes(color = group_pair),
+             shape = 16)+
+  geom_smooth(method = "lm", formula = y~x, se = F,  
+              aes(color = group_pair),
+              size = 0.5)+
+  theme_bw()+
+  xlab("mean abundance of the pair (detrended)") +
+  ylab("mean spatial overlap (MSO, detrended)") +
+  # remove background
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank())+
+  ggtitle(ggtitle)+
+     scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134',
+           '#FF6E3A','#FFC33B',"#000000"))
+  }
+
+
+# extract 1 fish per region
+
+pair.ns <- pair %>% 
+  filter(region == 'North Sea' &
+           common_name == 'Atlantic cod') %>% 
+  mutate_at('group_pair', as.factor)
+
+pair.swc <- pair %>% 
+  filter(region == 'Scottish West Coast' &
+           common_name == 'Red gurnard') %>% 
+  mutate_at('group_pair', as.factor)
+
+pair.bal <- pair %>% 
+  filter(region == 'Baltic Sea' &
+           common_name == 'Sprat') %>% 
+  mutate_at('group_pair', as.factor)
+
+pair.ebs <- pair %>% 
+  filter(region == 'Eastern Bering Sea' &
+           common_name == 'Pacific halibut') %>% 
+  mutate_at('group_pair', as.factor)
+
+a1 <- function_plot_example(pair.ns,'N.S. Atlantic cod')
+a2 <- function_plot_example(pair.swc, 'S.W.C. Hooknose')
+a3 <- function_plot_example(pair.bal, 'B.S. Sprat')
+a4 <- function_plot_example(pair.swc, 'E.B.S. Pacific halibut')
+
+grid.arrange(a1, a2, a3, a4, ncol=2)
+
+```
+
+#8. plot [Fig 1] illustrate cod 
+```{r}
+
+# mute geom_point so only show the lines
+
+ggplot(data = pair.ns, 
+       aes(x = log_mean_cpue, 
+           y = logit_so)) +
+  # geom_point(aes(color = group_pair),
+  #            shape = 16)+
+  geom_smooth(method = "lm", formula = y~x, se = F,  
+              aes(color = group_pair),
+              size = 0.8)+
+  theme_bw()+
+  xlab("mean abundance of the pair (detrended)") +
+  ylab("mean spatial overlap (MSO, detrended)") +
+  # remove background
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank())+
+     scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134',
+           '#FF6E3A','#FFC33B',"#000000"))
+
+```
+
+
+# 4.0 ration of positive relationships
+#(check: one size group pair is missing) 
+```{r}
+
+output.pair %>% 
+  filter(slope < 0) # 44
+
+output.pair %>% 
+  filter(slope > 0) # 515
+
+515/560
+
+```
+
+#9.1 among those with negative relationship, which was sig
+
+only size group pair 3-4 of Flathead sole in ebs has significant negative slope.
+
+```{r}
+
+output.pair %>% 
+  filter(slope < 0) %>% 
+  filter(p_sig == 'sig')
+
+```
+
+
+#9.2 check proportion sig with population
+
+result: 33 out of 56 populations has more than 50% of size group pair with significant p
+
+##(to solve) have problem to filter out one with significant negative relationship
+```{r}
+
+(prop.dd <- output.pair %>% 
+   # filter pair id 8, ebs, Flathead sole
+   # filter(pair_id != '8' & region != 'Eastern Bering Sea' & common_name != 'Flathead sole')
+  group_by(p_sig, region, common_name) %>%
+  tally() %>% 
+  pivot_wider(names_from = p_sig, values_from = n) %>% 
+  # replace NA = 0
+  replace(is.na(.), 0) %>% 
+  group_by(region, common_name) %>% 
+  rename(sig_non = 4) %>% 
+  mutate(prop_sig = sig/(sig + sig_non)) %>% 
+  filter(prop_sig > 0.5))
+
+
+```
+
+# 9.3 check by region
+
+result:
+number of populations in each region: 2,8,27,19
+number of populations with more than 50% group has sig p: 0,3,21,9
+
+
+```{r}
+
+# number of populations in each region: 2,8,27,19
+output.pair %>% filter(pair_id == 1) %>% group_by(region) %>% tally
+  
+# number of populations with more than 50% group has sig p: 1,5,23,11
+prop.dd %>% 
+  group_by(region) %>% 
+  tally()
+
+
+```
+
+# 9.4 check proportion sig with pair id
+Result
+pair_id: 61%-79% are significant
+prop_sig from high to low: 5,1,8,10,9,6,2,4,7,3
+```{r}
+
+output.pair %>% 
+  group_by(pair_id, group_pair,p_sig) %>%
+  tally() %>% 
+  rename(number = n) %>% 
+  pivot_wider(names_from = p_sig, values_from = number) %>% 
+  rename(sig_non = 4) %>% 
+  mutate(sum = sig+ sig_non) %>% 
+  mutate(prop_sig = sig / sum) %>% 
+  arrange(desc(prop_sig))
+  
+```
+
+
+
+#-----[Fig 3] between populations: examine beta along the gradient of growth 
+
+#1. prepare data
+join [output.pair] with [trait] to :
+1. prepare [trait.pair] to make a graph, and 
+2. prepare [trait.pair.nest] to model beta ~ k
+```{r}
+
+#1 select 6 life history traits, create [trait.6]
+trait.6 <- trait %>% ungroup() %>% 
+  dplyr::select(region, common_name,
+                age.maturity, length.infinity,length.max,
+                age.max,fecundity)
+
+#2 merge [trait.6] and [output.pair]
+trait.pair <- left_join(output.pair, trait.6, by = c("region","common_name"))
+
+#3 remove Baltic sea since there are only 2 points
+trait.pair <- trait.pair %>%
+  filter(region != "Baltic Sea")
+
+#2 group trait.pair, create [trait.pair.sep]
+trait.pair.nest <- trait.pair %>% 
+  pivot_longer(c(growth.coefficient, age.maturity,
+                 length.infinity,length.max,
+                 age.max,fecundity),
+               names_to = "trait.name",
+               values_to = "trait.value")
+
+#3 nest by pair_id, region, response, trait.name
+trait.pair.nest  <- trait.pair.nest  %>% 
+  dplyr::select(pair_id,region, common_name, 
+         slope, trait.name, trait.value) %>%
+  group_by(pair_id, region, trait.name) %>% 
+  nest()
+
+```
+
+
+#2. model beta ~ life history, create [output.pair.beta]
+```{r}
+
+# function: model beta
+fun_trait_model <- function(df)gls(slope ~ 
+    trait.value, na.action = na.omit, data = df)
+
+# function: extract output
+fun_trait_extract_sep <-function(data){
+
+output.trait <- data %>% 
+  mutate(., slope = map_dbl(model, slope_fun),
+                intercept = map_dbl(model, intercept_fun),
+            lci = map_dbl(model, ci_lower_fun),
+            uci = map_dbl(model, ci_upper_fun),
+            p = map_dbl(model, p_value_fun)) %>%
+  dplyr::select(pair_id,region, trait.name, slope, intercept, lci, uci, p)
+
+} 
+
+# apply function
+output.pair.beta <- trait.pair.nest %>% 
+  mutate(model = purrr::map(data, fun_trait_model))
+
+output.pair.beta <- fun_trait_extract_sep(output.pair.beta)
+
+output.pair.beta <- output.pair.beta %>% arrange(trait.name)
+
+#5 assign p-sig
+output.pair.beta <- output.pair.beta %>% 
+  mutate(p_sig = replace(p, p<0.05,"sig")) %>% 
+  mutate(p_sig = replace(p_sig, p > 0.05, "sig-non"))%>% 
+  relocate(p_sig,.after = "p")
+  
+```
+
+#3 calcu trait range, expected y, save [output.pair.beta]
+1. use [trait.pair.nest] trait values to generate max and min trait <trait.max> <trait.min> , store in [x.max.min]
+2. join [x.max.min] to [output.pair.beta]
+3. in [output.pair.beta] calculate <trait.yend> using intercept, slope, and trait.max
+
+```{r}
+
+# extract x range (it is region-specific depending on which species included in each region)
+
+#1 data
+trait.pair.nest
+  
+#2 function to extract x range
+fun_x <- function(df){
+  df %>%
+    summarise(trait.min = min(trait.value),
+              trait.max = max(trait.value))}
+
+#3 apply function
+x.max.min <- trait.pair.nest %>%
+  ungroup() %>% 
+  group_by(region) %>% 
+  mutate(output = purrr::map(data, fun_x))
+
+#4 arrange output to create a x range table
+x.max.min  <- x.max.min  %>% 
+  ungroup() %>% 
+  dplyr::select(pair_id, region, trait.name, output) %>% 
+  unnest(cols = c(output))
+
+
+# add x range to out.trait.sep
+output.pair.beta <- 
+  left_join(output.pair.beta, x.max.min, 
+            by = c('pair_id',"region", "trait.name"))
+
+# calculate y range (ymin = intercept so not need to calculate. Only calculate yend)
+output.pair.beta <- output.pair.beta  %>% 
+  mutate(trait.yend = intercept + slope * trait.max)
+
+
+```
+
+#4 re-order region, rename pair for [trait.pair] [output.pair.beta]
+```{r}
+
+# check pair id of x & y
+cpue.pair %>% 
+  group_by(pair_id) %>% 
+  summarise(x = mean(pair_id_x),
+            y = mean(pair_id_y))
+
+# for trait.pair
+trait.pair <- 
+  trait.pair %>%
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North_Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      'Baltic Sea' ~ '3_Baltic Sea',
+      "Eastern Bering Sea" ~ "3_Eastern Bering Sea")) %>%
+  mutate_at('pair_id', as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+# for output.pair.beta
+output.pair.beta <- 
+  output.pair.beta %>%
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North_Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      "Eastern Bering Sea" ~ "3_Eastern Bering Sea")) %>%
+  mutate_at('pair_id', as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+
+```
+
+
+#5 plot [Fig 3a]: beta ~ K in xy plot
+```{r}
+
+
+# using [output.pair.beta] to: 
+## 1 create [slope.pair], for adding to ggplot2 to assign trait.min, trait.max, intercept, trait.yend
+
+slope.pair <- output.pair.beta %>% 
+    filter(trait.name == "growth.coefficient") %>% 
+  mutate_at('group_pair', as.factor)
+
+## 2 create [line.type], for assigned line types 
+slope.pair.line <- ifelse(slope.pair$p_sig =="sig", 
+                               "solid", "dashed")
+
+
+# plot all pairs
+trait.pair %>%
+ggplot(.,aes(x = growth.coefficient,
+                 y = slope, ymin =lci, ymax = uci))+
+  geom_pointrange(aes(color = group_pair),
+                  shape = 16, size = 0.3) +
+  # geom_smooth(method = 'lm', aes(color = pair_id),
+  #             se = FALSE, size = 0.5)+
+  geom_segment(data = slope.pair,
+      aes(x = trait.min, xend = trait.max, 
+          y = intercept, yend = trait.yend,
+          color = group_pair), 
+      size = 0.4,
+      lty = slope.pair.line)+
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.position="none")+
+  facet_wrap(vars(region_reorder), ncol = 3,
+             labeller = labeller(region_reorder = 
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  ylab("pair-specific beta")+
+  ylim(-3, 5)+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  xlab('Body growth rate')
+
+
+
+
+# another color example
+colorBlindBlack8  <- c("#000000", "#E69F00", "#56B4E9", "#009E73",
+                       "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+
+getwd()
+```
+
+#6 plot [Fig 3b]: forest plot beta ~ K 
+
+```{r}
+  
+output.pair.beta %>% 
+  mutate_at('pair_id', as.factor) %>%
+  # first look at K, later look at each trait
+  filter(trait.name == 'growth.coefficient') %>% 
+  ggplot(., 
+         aes(y = group_pair))+
+  geom_point(aes(x = slope,color = pair_id), 
+             shape = 16, size = 3)+
+  geom_linerange(aes(xmin=lci, xmax=uci,
+                     linetype = p_sig, alpha = 0.5),
+                 size = 0.8)+
+  facet_wrap(vars(region_reorder),
+             labeller = labeller(region_reorder = 
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank()) +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, size=0.3, linetype = 'solid')+
+  xlab('relationship between pair-specific beta and growth coefficient K')+
+  scale_y_discrete(limits=rev)
+
+
+```
+
+
+#7 plot [Fig 1]: illustrate north sea
+
+```{r}
+
+# plot all pairs
+trait.pair %>%
+ggplot(.,aes(x = growth.coefficient,
+                 y = slope, ymin =lci, ymax = uci))+
+  # geom_pointrange(aes(color = group_pair),
+  #                 shape = 16, size = 0.3) +
+  # geom_smooth(method = 'lm', aes(color = pair_id),
+  #             se = FALSE, size = 0.5)+
+  geom_segment(data = slope.pair,
+      aes(x = trait.min, xend = trait.max,
+          y = intercept, yend = trait.yend,
+          color = group_pair),
+      size = 0.3)+
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.position="none")+
+  facet_wrap(vars(region_reorder), ncol = 3,
+             labeller = labeller(region_reorder = 
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  ylab("pair-specific beta")+
+  ylim(-3, 5)+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  xlab('Body growth rate')
+
+
+```
+
+
+#8 plot other life history traits
+
+
+
+```{r}
+
+plot.life.history <- function(life.history, title){
+  output.pair.beta %>% 
+  mutate_at('pair_id', as.factor) %>%
+  filter(trait.name == life.history) %>% 
+  ggplot(., 
+         aes(y = group_pair))+
+  geom_point(aes(x = slope,color = pair_id), 
+             shape = 16, size = 3)+
+  geom_linerange(aes(xmin=lci, xmax=uci,
+                     linetype = p_sig, alpha = 0.5),
+                 size = 0.8)+
+  facet_wrap(vars(region_reorder),
+             labeller = labeller(region_reorder =
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank()) +
+  scale_y_discrete(limits=rev)+
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, size=0.3, linetype = 'solid')+
+  xlab('slope and CI')+ 
+  ggtitle(title)
+}
+
+# traits: age.maturity,age.max,length.infinity,length.max, fecundity
+plot.life.history('age.maturity','age at maturity')
+plot.life.history('age.max','Maximum age')
+plot.life.history('length.infinity','Length at infinity')
+plot.life.history('length.max','Maximum length')
+plot.life.history('fecundity','Fecundity')
+
+
+```
+
+#9 plot k vs length.infinity
+
+```{r}
+ggplot(data = trait,
+       aes(x = growth.coefficient, y = length.infinity))+
+  geom_point()+
+  geom_smooth(method = 'loess')+
+  theme_bw()
+```
+
+
+
+#-----[Fig 4] check vulnerable populations in the plane of beta as y axis and abundance as x axis
+
+#1 compute abundance trend for each population, model output store in [output.abu.trend]
+Note that log abundance is used to fit the model
+```{r}
+
+# create [cpue.year.nest] nest by species and region
+cpue.year.nest <- cpue.year %>% 
+  dplyr::select(common_name, region, cpue_year, year) %>% 
+  group_by(common_name, region) %>% 
+  nest
+
+
+# function for model
+fun_model_abu <- function(df)gls(log(cpue_year) ~ year, 
+    na.action = na.omit, data = df)
+
+# function to extract outputs
+fun_model_abu_extract_slope <-function(data){
+
+output.abu <- data %>% 
+  mutate(., slope = map_dbl(model, slope_fun),
+                intercept = map_dbl(model, intercept_fun),
+            lci = map_dbl(model, ci_lower_fun),
+            uci = map_dbl(model, ci_upper_fun),
+            p = map_dbl(model, p_value_fun)) %>%
+  dplyr::select(region, common_name,intercept, slope,lci, uci, p)} 
+
+# apply functions
+output.abu.trend <- cpue.year.nest %>% 
+  mutate(model = purrr::map(data, fun_model_abu))
+
+output.abu.trend <- fun_model_abu_extract_slope(output.abu.trend)
+
+
+#5 assign p-sig
+output.abu.trend <- output.abu.trend %>% 
+  mutate(p_sig = replace(p, p<0.1,"sig")) %>% 
+  mutate(p_sig = replace(p_sig, p > 0.1, "sig-non"))%>% 
+  relocate(p_sig,.after = "p")
+
+```
+
+#2 prepare tibble to plot: join [output.abu.trend] with [output.pair]
+```{r}
+
+# join two tibbles 
+output.abu.trend
+output.pair
+
+# take the mean of beta in [output.pair] and store in [beta.tibble]
+beta.tibble <- output.pair %>% 
+  group_by(region, common_name) %>% 
+  summarise(beta_mean_pair = mean(slope))
+
+# rename variables in [output.abu.trend]
+abu.tibble <- output.abu.trend %>% 
+  dplyr::select(region, common_name, slope, lci, uci) %>% 
+  rename(abu_trend = slope,
+         abu_trend_lci = lci,
+         abu_trend_uci = uci)
+  
+
+# join two tibbles
+beta.abu.tibble <- 
+  left_join(abu.tibble, beta.tibble, by = c("common_name", "region"))
+
+# add K to the tibble
+trait.k <-trait %>% dplyr::select(region, common_name, growth.coefficient)
+
+beta.abu.tibble <- 
+  left_join(beta.abu.tibble,trait.k, by = c("common_name", "region"))
+
+# add fishbase.traits
+fishbase.trait
+
+beta.abu.tibble <- 
+  left_join(beta.abu.tibble,fishbase.trait, by = c("common_name", "region"))
+
+# add slope from [output.pair lme]
+beta.lme.tibble <- output.pair.lme %>% 
+  dplyr::select(region, common_name,slope) %>% 
+  rename(beta_lme = slope)
+
+beta.abu.tibble <- 
+  left_join(beta.abu.tibble,beta.lme.tibble, by = c("common_name", "region"))
+
+```
+
+#3 plot [Fig 4] x as log_abundance trend, y as beta
+```{r}
+
+# remove angler with SO > 2
+beta.abu.tibble %>% 
+  filter(beta_mean_pair < 2) %>% 
+  ggplot(aes(x = abu_trend, y = beta_mean_pair,
+             color = 'black',
+             label = common_name))+
+  geom_vline(xintercept = 0, size=0.3, linetype = 'dotted')+
+  geom_point(aes(color = region))+
+  geom_text(hjust=0, vjust=0, size = 3, color = 'black')+
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank())+
+  scale_color_manual(values = c('#8400CD','#FFC33B','#009F81','#008DF9'))
+
+
+```
+
+
+
+
+

@@ -1,0 +1,265 @@
+---
+title: "03Edit_SpeciesFiltration_LengthGroupCleaning"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+#Set working directory
+```{r setup}
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+
+knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+```
+
+#library
+```{r}
+library("tidyverse")
+```
+
+#Mich species
+```{r}
+
+mich.sp <- c("Leucoraja naevus",
+      "Enchelyopus cimbrius",
+      "Agonus cataphractus",
+      "Scyliorhinus canicula",
+      "Echiichthys vipera",
+      "Cyclopterus lumpus",
+      "Arnoglossus laterna",
+      "Sebastes viviparus",
+      "Myoxocephalus scorpius",
+      "Maurolicus muelleri",
+      "Gadiculus argenteus",
+      "Lumpenus lampretaeformis",
+      "Buglossidium luteum",
+      "Callionymus maculatus",
+      "Raja montagui",
+      "Amblyraja radiata",
+      "Raja clavata",
+      "Gasterosteus aculeatus",
+      "Lycodes vahlii")
+
+```
+
+#------------Functions--------------------
+#<Function>: Selection criteria 1: abundance
+
+critical_mean_cpue_year > a
+
+a: the critical abundance value that we could freely define
+
+step1.Calculate total_cpue_year
+step2.Calculate mean_cpue_year
+step3.Filter species whose mean_cpue_year is above the critical_mean_cpue_year that we defined. 
+```{r}
+get_key1_mean_cpue_year <- function(fish.data, critical.mean.cpue.year){
+ 
+fish.filter.mean.cpue.year <- fish.data %>%
+  #Step1.
+  group_by(region, yearqua,species) %>% 
+  summarise(total_cpue_year=sum(cpue_length_subarea_yearqua)) %>%
+  #Step2.
+  group_by(region, species) %>% 
+  summarise(mean_cpue_year = mean(total_cpue_year)) %>%
+  #Step3.
+  filter(mean_cpue_year >= critical.mean.cpue.year) 
+
+  return(fish.filter.mean.cpue.year)
+  
+}
+
+```
+
+
+#<Function>: Selection criteria 2: cpue evenness
+
+the number of year reaching "critical.total.cpue.year b" > c
+
+*b: thecritical.total.cpue.year that we could freely define;
+*c: LowerBound_NumYear which reaches critical.total.cpue.year
+
+step1.Calculate total_cpue_year
+step2.Count num_year during which total_cpue_year reaches the LowerBound_NumYear we defined.
+step3.Filter species whose NumYear meeting critical cpue is above the 80% of survey duration. 
+
+*1221 edit: LowerBound_NumYear = 80% x n_distinct(yearqua)* -> 80% yearqua should reach critical.total.cpue.year
+
+```{r}
+get_key2_evenness_cpue <- function(fish.data, critical.total.cpue.year){
+
+fish.filter.evenness.cpue <- fish.data %>% 
+  #Step1.
+  group_by(region, yearqua, species) %>% 
+  summarise(total_cpue_year=sum(cpue_length_subarea_yearqua)) %>%
+  #Step2.
+  group_by(region,species) %>% 
+  mutate(num_year_cpue_above_critical = length(which(total_cpue_year>=critical.total.cpue.year)))%>%  
+  #Step3.
+  group_by(region) %>%
+  filter(num_year_cpue_above_critical >= n_distinct(yearqua)*0.8) %>%
+  select(region,species,num_year_cpue_above_critical) %>%
+  unique()
+
+return(fish.filter.evenness.cpue)
+}
+
+```
+
+#<Function>: Species selection criteria 3 : length group number
+
+critical.group.num d; all.group.num e;
+
+*d: Critical LengthGroup Number; 
+*e: All LengthGroup Number
+
+step1. Count num_group_year for each species
+step2. Count num_year_group_above_critical & num_year_all_group for each species, then arrange data
+step3. Filter species with their critical.group.num/all.group.num meeting all survey year/80% survey year
+```{r}
+get_key3_group_num <- function(fish.data,critical.group.num, all.group.num){
+  
+fish.filter.group.num <- fish.data %>% 
+  #Step1.
+  ungroup() %>% 
+  select(-subarea,-cpue_length_subarea_yearqua) %>%
+  group_by(region,species,yearqua) %>%
+  summarise(num_group_year=n_distinct(length_group))%>%
+  #Step2.
+  group_by(region,species) %>%
+  mutate(num_year_group_above_critical=length(which(num_group_year >= critical.group.num)),
+         num_year_all_group=length(which(num_group_year == all.group.num))) %>%
+  select(-num_group_year) %>%
+  unique()
+
+#Step3.
+fish.filter.group.num <- fish.filter.group.num %>% 
+  group_by(region) %>%
+  filter( num_year_group_above_critical == n_distinct(yearqua) & 
+          num_year_all_group >= n_distinct(yearqua)*0.8) %>%
+  select(-yearqua) %>%
+  unique()
+
+return(fish.filter.group.num)
+
+}
+
+```
+
+#------------Species filtration--------------------
+Partitioning populations into fewer length-groups can help to include as many as populations.
+So, the species list for our analysis will be produced based on 5 length-groups scenario.
+
+However, we will compare the effect of length-group numbers (N=5~10) with sensitivity analysis.
+
+For all length-group Scenario (N=5~10), we will further clean data for these species in Script 4, and proceed deriving overlap indices in script 5.
+
+#<with loop>: Species selection (N=5~10 & cutoff=0.1~3)
+step1. read data
+step2. species selection via 3 criteria:
+        *consider the above 3 selection keys to select species*
+        <Key1>: Select species based on mean abundance during survey period
+        <Key2>: Select species based on cpue evenness during survey period
+        <key3.> Select species based on number of length group each year
+step3. save data
+```{r}
+
+group.num=seq(5,10,1)
+cutoff= c(0.1,1,3)
+
+
+for (i in 1:length(group.num)) {
+  
+  for (j in 1:length(cutoff)) {
+  
+    #step1
+    all.fish.length <- read.csv(paste0("data/initial_data/lengthgroup_specific/",group.num[i],
+                                       "_lengthgroup/with_extreme/cutoff_",cutoff[j],"/",group.num[i],"_lengthgroup_cut.csv"))
+
+    all.fish.length <- all.fish.length %>% select(-X) %>%
+      filter(!species %in% mich.sp)
+
+
+    #step2
+    #<Key1>
+    fish.selection.mean.cpue.year <- get_key1_mean_cpue_year(all.fish.length,
+                                                             critical.mean.cpue.year = 50)
+    #<Key2>
+    fish.selection.evenness.cpue <- get_key2_evenness_cpue(all.fish.length,
+                                                           critical.total.cpue.year = 25)
+    #<Key3>
+    fish.selection.group.num <- get_key3_group_num(all.fish.length,
+                                                   critical.group.num = round(0.8*group.num[i]),
+                                                   all.group.num = group.num[i])
+
+
+    sp.filter.key.temp <- inner_join(fish.selection.mean.cpue.year,fish.selection.evenness.cpue)
+    sp.filter.key <- inner_join(sp.filter.key.temp,fish.selection.group.num)
+
+    sp.filter.key <- sp.filter.key %>% relocate("region", .before = "species")
+
+
+    #step3.
+    write.csv(sp.filter.key, file = paste0("data/initial_data/lengthgroup_specific/",
+                                           group.num[i],"_lengthgroup/with_extreme/cutoff_",
+                                           cutoff[j],"/filtered_species_",group.num[i],"_lengthgroup.csv"))
+
+    }
+}
+
+```
+
+
+
+
+#<without loop>: Species selection step by step
+*5 length-groups & 1% cutoff as example in the following*
+```{r}
+
+# Can't read the file, not sure why,so I wrote a directory to the file.
+
+# group.num=5
+# cutoff=1
+# 
+# all.fish.length <- read.csv(paste0("data/initial_data/lengthgroup_specific/",group.num,"_lengthgroup/with_extreme/cutoff_",cutoff,"/",group.num,"_length_group_cut.csv"))
+
+all.fish.length <- read.csv("data/initial_data/lengthgroup_specific/5_lengthgroup/with_extreme/cutoff_1/5_lengthgroup_cut.csv")
+
+
+
+
+all.fish.length <- all.fish.length %>%
+  select(-X)
+
+all.fish.length %>% select(region,species) %>% unique()
+
+#step2
+#<Key1>
+fish.selection.mean.cpue.year <- get_key1_mean_cpue_year(all.fish.length,
+                                                         critical.mean.cpue.year = 50)
+#<Key2>
+fish.selection.evenness.cpue <- get_key2_evenness_cpue(all.fish.length,
+                                                       critical.total.cpue.year = 25)
+#<Key3>
+fish.selection.group.num <- get_key3_group_num(all.fish.length,
+                                               critical.group.num = round(0.8*group.num),
+                                               all.group.num = group.num)
+
+
+sp.filter.key.temp <- inner_join(fish.selection.mean.cpue.year,
+                                fish.selection.evenness.cpue)
+sp.filter.key <- inner_join(sp.filter.key.temp,
+                           fish.selection.group.num)
+
+sp.filter.key <- sp.filter.key %>%
+  relocate("region", .before = "species")
+
+
+#step3.
+write.csv(sp.filter.key, file = "data/initial_data/lengthgroup_Specific/5_lengthgroup/with_extreme/cutoff_1/filtered_species_5_lengthgroup.csv")
+
+sp.filter.key 
+
+```
+
+

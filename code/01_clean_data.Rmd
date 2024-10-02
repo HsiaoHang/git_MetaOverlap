@@ -1,0 +1,247 @@
+---
+title: "Initial_Cleaning-NS-IBTS_data"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+#Set working directory
+```{r setup}
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+
+
+knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+
+```
+
+#library
+```{r}
+
+library("tidyverse")
+
+```
+
+#------------Read & Merge data--------------------
+# ns swc ebs data
+(suppressed:bal)
+```{r}
+#------- NS
+ns <-read.csv("data/raw_data/ns_raw_formatted.csv") # 1822998      13
+ns <- ns %>% select(-X)
+names(ns)
+
+#------- SWC
+swc <- read.csv("data/raw_data/swc_raw_formatted.csv")
+swc <- swc %>% select(-X)
+names(swc)
+
+#------- Bal
+bal <- read.csv(file="data/raw_data/bal_raw_formatted.csv")
+bal <- bal %>% select(-X)
+names(bal)
+
+#------- EBS
+ebs <- read.csv(file="data/raw_data/ebs_raw_formatted.csv")
+ebs<- ebs %>% select(-X) %>%
+  mutate_at("subarea", as.character)
+names(ebs)
+
+
+ns %>% group_by(species) %>% tally()
+swc %>% group_by(species) %>% tally()
+bal %>% group_by(species) %>% tally()
+ebs %>% group_by(species) %>% tally()
+
+```
+# Bind all raw data
+```{r}
+# bind all datasets
+fish.all <- bind_rows(ns, swc, bal, ebs)
+#fish.all <- bind_rows(ns, swc, ebs)
+```
+
+#------------Cleaning Start--------------------
+
+# Select year, quarter
+@ Strange for swc, some sp. have same max and min length?
+*Because they are too rare*
+```{r}
+
+fish.all <-  fish.all %>%
+  filter(year >=1982 & year <= 2019) %>% 
+  filter(length > 0) %>% 
+  filter(cpue_number_per_hour > 0) %>%
+  # quarter 1 for ns and swc, quarter 0 for BS and EBS
+  filter(quarter == c("1","0")) %>%
+  mutate(yearqua=paste(year,quarter,sep=".")) %>%
+  relocate(yearqua,.before = "subarea") %>%
+  #phylo.ordered(ns.sp.phylo.order) %>%
+  mutate_at("species", as.character)
+
+# Check max & min length
+fish.all %>%
+  group_by(species, region) %>%
+  summarise(max_length = max(length),
+            min_length = min(length)) %>% 
+  arrange(region)
+```
+
+# Deriving extreme length & cut-offs
+
+Lower & Upper cut-offs of extreme body size are defined as  lenth shorter than x% or longer than (100-x)% within yearly length-abundance relationship
+
+step1. Deriving yearly cummulative length-abundance relationship
+step2. Recording length in 0.1%,1%,3% at both ends in each year as lower/upper bound of extreme length
+Step3. Taking median on yearly lower/upper bound (length_upperbound_year; length_lowerbound_year)
+step4. Recording Max/Min length across survey records
+
+```{r}
+
+fish.all <- fish.all %>%
+  #Step1
+  group_by(region, species,year,length) %>% 
+  mutate(cpue_length_year=sum(cpue_number_per_hour)) %>%
+  arrange(region, species,year, length) %>% 
+  #Step2
+  group_by(region, species,year) %>% 
+  mutate(cummulative_cpue_length = cumsum(cpue_length_year)/sum(cpue_length_year))%>%
+  group_by(region, species,year) %>%
+  mutate(
+         length_lowerbound_year_0.1= length[min(which(cummulative_cpue_length>0.001))],
+         length_upperbound_year_0.1= length[min(which(cummulative_cpue_length>0.999))],
+         
+         length_lowerbound_year_1= length[min(which(cummulative_cpue_length>0.01))],
+         length_upperbound_year_1= length[min(which(cummulative_cpue_length>0.99))],
+         
+         length_lowerbound_year_3= length[min(which(cummulative_cpue_length>0.03))],
+         length_upperbound_year_3= length[min(which(cummulative_cpue_length>0.97))]
+         
+         #length_lowerbound_year_5= length[min(which(cummulative_cpue_length>0.05))],
+         #length_upperbound_year_5= length[min(which(cummulative_cpue_length>0.95))],
+         
+         #length_lowerbound_year_10= length[min(which(cummulative_cpue_length>0.1))],
+         #length_upperbound_year_10= length[min(which(cummulative_cpue_length>0.9))]
+         
+         
+         ) %>%
+  #Step3
+  group_by(region, species) %>% 
+  mutate(
+         median_length_lowerbound_0.1=median(length_lowerbound_year_0.1),
+         median_length_upperbound_0.1=median(length_upperbound_year_0.1),
+         
+         median_length_lowerbound_1=median(length_lowerbound_year_1),
+         median_length_upperbound_1=median(length_upperbound_year_1),
+         
+         median_length_lowerbound_3=median(length_lowerbound_year_3),
+         median_length_upperbound_3=median(length_upperbound_year_3)
+         
+         #median_length_lowerbound_5=median(length_lowerbound_year_5),
+         #median_length_upperbound_5=median(length_upperbound_year_5),
+         
+         #median_length_lowerbound_10=median(length_lowerbound_year_10),
+         #median_length_upperbound_10=median(length_upperbound_year_10)
+         
+         ) %>%
+  #Step4
+  group_by(region, species) %>%
+  mutate(min_length = min(length),
+         max_length = max(length)) 
+
+#fish.all %>% 
+#  select(region, species,
+#         median_length_lowerbound,
+#         median_length_upperbound,
+#         min_length,
+#         max_length) %>%
+#  group_by(region, species) %>% 
+#  unique()
+
+```
+
+#Derive extreme.length.cutoff
+```{r}
+extreme.length.cutoff <- fish.all %>%
+  select(region, species, 
+         median_length_lowerbound_0.1, median_length_upperbound_0.1,
+         median_length_lowerbound_1, median_length_upperbound_1,
+         median_length_lowerbound_3, median_length_upperbound_3
+         #median_length_lowerbound_5, median_length_upperbound_5,
+         #median_length_lowerbound_10, median_length_upperbound_10
+         ) %>%
+  unique() 
+```
+
+#Save extreme.length.cutoff
+```{r}
+
+write.csv(extreme.length.cutoff,file= "data/initial_data/extreme_length_cutoff.csv")
+```
+
+
+#Derive (max) range size each year:
+step1. Count yearly range for each sp
+step2. Derive max yearly range for each sp
+
+This dataset will be used to draw abundance-length distribution
+*Note that some species have less than 10 length groups in some years, better to partition them into 5 lengthgroups
+
+```{r}
+fish.all <- fish.all %>% 
+  #Step1
+  group_by(region, year,quarter,species) %>%
+  mutate(yearly_range = n_distinct(subarea)) %>%
+  #Step2
+  group_by(region, species) %>% 
+  mutate(max_yearly_range = max(yearly_range))
+```
+
+#Save (max) range size each year
+```{r}
+write.csv(fish.all,file= "data/initial_data/all_region_initial_clean.csv")
+```
+
+
+#------------Below are skippable---------
+# Make a summary table
+```{r} 
+
+(table <- fish.all %>%
+    group_by(region, species) %>%
+    summarise(# Number of subareas
+              number_subarea_found = n_distinct(subarea),
+              # Time series length
+              number_year_found = n_distinct(yearqua),
+              record_year_start = min(year),
+              record_year_end = max(year)))
+
+# save as "species_list_before_filtering_rmd1" in summary_data folder
+write.csv(table,file= "data/summary_data/species_list_before_filtering_rmd1.csv")
+
+```
+
+# Number of species per region
+```{r}
+(table <- fish.all %>%
+    group_by(region) %>%
+    summarise(number_subarea_found = n_distinct(species)))
+
+# save as "number_species_before_filtering_rmd1" in summary_data folder
+write.csv(table,file= "data/summary_data/number_species_before_filtering_rmd1.csv")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

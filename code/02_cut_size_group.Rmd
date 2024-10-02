@@ -1,0 +1,264 @@
+---
+title: "02Edit_LengthGroupCutting"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+#Set working directory
+```{r setup}
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+
+
+knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+```
+
+#library
+```{r}
+
+library("tidyverse")
+
+
+```
+
+#------------Functions--------------------
+# <Function>: Cut population into N LengthGroup, "Including extreme.length"
+step1. Split original dataset into Extreme/Normal Length
+step2. For Extreme Length, classified those shorter than left cut-off or longer than right cut-off into LengthGroup "1" or "N"
+step3. For Normal Length, classified individuals into LengthGroup "1"~"N"
+step4. Combine Extreme/Normal Length data
+
+#Calculate Quotient = ((original length class - min class) %/% (length range/group.num)) +1
+```{r}
+
+cut_length_with_extreme <- function(fish.data,group.num){
+
+#Step1
+extreme.length <- fish.data %>%
+  group_by(species) %>%
+  filter(length < median_length_lowerbound | length > median_length_upperbound)#
+
+normal.length <- fish.data %>%
+  group_by(species) %>%
+  filter(length >= median_length_lowerbound & length <= median_length_upperbound)
+
+#Step2
+cpue.length.subarea.yearqua.extreme <- extreme.length %>% 
+  group_by(region,species) %>%
+  mutate(length_group = case_when(
+    length <= median_length_lowerbound ~ 1,
+    length >= median_length_upperbound ~ group.num,
+  ))
+
+#Step3
+cpue.length.subarea.yearqua.no.extreme <- normal.length %>% 
+  group_by(region,species) %>%
+  mutate(length_group=((length-min(length)) %/% (( (max(length)+0.000001)-min(length))/group.num))+1) %>%
+  filter (length_group <= group.num)
+
+#Step4
+  cpue.length.subarea.yearqua <- bind_rows(cpue.length.subarea.yearqua.no.extreme,
+                                           cpue.length.subarea.yearqua.extreme) %>%
+  # Summation of cpue for all original lengthes that belong to the newly-defined Length interval
+  group_by(region,species,yearqua,subarea,length_group) %>% 
+  summarize(cpue_length_subarea_yearqua=sum(cpue_number_per_hour)) %>%
+  
+  #phylo.ordered(ns.sp.phylo.order) %>% 
+    
+  print(paste0("Scenario LengthGroup = ",group.num, " has been completed."))
+
+return(cpue.length.subarea.yearqua)
+
+}
+
+
+```
+
+#<Function>: Cut population into N LengthGroup, "Excluding extreme.length"
+```{r}
+
+cut_length_no_extreme <- function(fish.data,group.num){
+
+normal.length <- fish.data %>%
+  group_by(species) %>%
+  filter(length >= median_length_lowerbound & length <= median_length_upperbound)#dim(1014561,18)
+
+
+
+cpue.length.subarea.yearqua<- normal.length %>% 
+  group_by(region,species) %>%
+  #Calculate Quotient = ((Original Length Class - min class) %/% (length range/group.num)) +1
+  mutate(length_group=((length-min(length)) %/% (( (max(length)+0.000001)-min(length))/group.num))+1) %>% 
+  filter (length_group <= group.num) %>%
+  # Summation of cpue for all original lengthes that belong to the newly-defined Length interval
+  group_by(region,species,yearqua,subarea,length_group) %>% 
+  summarize(cpue_length_subarea_yearqua=sum(cpue_number_per_hour)) %>%
+  
+  print(paste0("Scenario LengthGroup = ",group.num, " has been completed."))
+
+return(cpue.length.subarea.yearqua)
+
+}
+#CutInto.LengthGroup.noEx(NS.fish.arrange,10) #dim(533768,6)
+```
+
+#------------LengthGroup Cutting--------------------
+# Load data
+*Input data: all.region.initial_clean.csv*
+```{r}
+fish <- read.csv("data/initial_data/all_region_initial_clean.csv")
+
+fish <- fish %>%
+  select(-X)
+```
+
+
+#Setting different cutoff criteria (for later sensitivity analysis)
+```{r}
+
+cutoff <- c(0.1,1,3)
+
+lowerbound <- c(paste0("median_length_lowerbound_",cutoff))
+upperbound <- c(paste0("median_length_upperbound_",cutoff))
+
+fish.lower <- fish %>%
+  select(region,species,yearqua,subarea,length,
+         cpue_number_per_hour, cpue_length_year,
+         median_length_lowerbound_0.1,
+         median_length_lowerbound_1,
+         median_length_lowerbound_3
+         #median_length_lowerbound_5,
+         #median_length_lowerbound_10
+         ) %>%
+  gather(key="median_lowerbound_position",
+         value = "median_length_lowerbound",
+          c(median_length_lowerbound_0.1,
+            median_length_lowerbound_1,
+            median_length_lowerbound_3
+            #median_length_lowerbound_5,
+            #median_length_lowerbound_10
+            ),
+         
+         c(-region,-species,-yearqua,-subarea,-length,
+           -cpue_number_per_hour,-cpue_length_year)) 
+
+
+fish.upper <- fish %>%
+  select(region,species,yearqua,subarea,length,
+         cpue_number_per_hour, cpue_length_year,
+         median_length_upperbound_0.1,
+         median_length_upperbound_1,
+         median_length_upperbound_3
+         #median_length_upperbound_5,
+         #median_length_upperbound_10
+         ) %>%
+  gather(key="median_upperbound_position",
+         value = "median_length_upperbound",
+         c(median_length_upperbound_0.1,
+           median_length_upperbound_1,
+           median_length_upperbound_3
+           #median_length_upperbound_5,
+           #median_length_upperbound_10
+           ),
+         
+         c(-region,-species,-yearqua,-subarea,-length,
+           -cpue_number_per_hour,-cpue_length_year))
+
+
+fish <- left_join(fish.lower,fish.upper)
+
+
+```
+
+
+
+
+# <with loop>: Cut populations into 5 ~ 10 LengthGroups 
+```{r}
+group.num <- seq(5,10,1)
+
+
+for ( i in 1:length(group.num)) {
+  
+  for (j in 1:length(cutoff)) {
+  
+  fish.data <- fish %>%
+    filter(median_lowerbound_position == lowerbound[j] &
+           median_upperbound_position == upperbound[j])
+  
+  fish.cut.length <- cut_length_with_extreme(fish.data = fish.data,
+                                           group.num = group.num[i])
+
+  print(paste0("Cut populations into ",group.num[i]," length-groups, row numbers = ",nrow(fish.cut.length[1])))
+
+  dir <- paste0("data/initial_data/lengthgroup_specific/",group.num[i],
+                "_lengthgroup/with_extreme/cutoff_",cutoff[j],"/",group.num[i],"_lengthgroup_cut.csv")
+
+  write.csv(fish.cut.length,file = dir)
+  }
+}
+
+```
+# <without loop>: Run with 10 groups
+```{r}
+fish.cut.length <- cut_length_with_extreme(fish.data = fish,
+                                       group.num = 5)
+# Check
+fish.cut.length %>% 
+  group_by(region, species) %>% 
+  tally()
+```
+
+
+
+
+
+#------------Below are skippable---------
+*Note* 
+Further cleaning and filtering of "species" & "Years with Incomplete LengthGroup" will be processed in script 03 & 04:
+<Process1.>The species will be selected based on mean yearly cpue & yearly summed cpue (script03)
+<Process2.>The noise about LengthGroup will be removed based on YearlyNumLengthGroup (script04; also see below Check3.)
+
+
+*Note* 
+<Check1.> ~ <Check3.> are skippable. (Only for familiarizing dataset)
+Please see script 3 for further cleaning of fish.cut.length data
+
+
+
+
+# <Check1.> LengthGroup Conditions 
+```{r}
+
+fish.cut.length %>% 
+  select(region,species,length_group) %>%
+  group_by(region,species) %>%
+  #Calculate the number of LengthGroup that one species can be partitioned into.
+  summarise(num_length_group = n_distinct(length_group)) %>%
+  filter(num_length_group<10)
+
+fish.cut.length %>%  
+  select(region,species,length_group) %>%
+  group_by(region,species) %>%
+  summarise(num_length_group= n_distinct(length_group)) %>%
+  filter(num_length_group==10)
+```
+
+
+# <Check2.> How many years are each LengthGroup being surveyed
+```{r}
+
+fish.cut.length %>% 
+  ungroup() %>%select(-subarea,-cpue_length_subarea_yearqua) %>%
+  #Count the number of year that one lengthgroup was surveyed across studied period 
+  group_by(region,species, length_group) %>% 
+  summarise(num_survey_year=n_distinct(yearqua))
+
+  
+```
+
+
+
+
+
+

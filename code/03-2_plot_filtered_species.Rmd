@@ -1,0 +1,267 @@
+---
+title: "03-2_plot_filtered_species"
+output: html_document
+date: "2023-03-15"
+---
+
+
+
+
+#Set working directory
+```{r setup}
+
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+
+knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+```
+
+#library
+```{r}
+library("tidyverse")
+```
+
+#Mich species
+```{r}
+
+mich.sp <- c("Leucoraja naevus",
+      "Enchelyopus cimbrius",
+      "Agonus cataphractus",
+      "Scyliorhinus canicula",
+      "Echiichthys vipera",
+      "Cyclopterus lumpus",
+      "Arnoglossus laterna",
+      "Sebastes viviparus",
+      "Myoxocephalus scorpius",
+      "Maurolicus muelleri",
+      "Gadiculus argenteus",
+      "Lumpenus lampretaeformis",
+      "Buglossidium luteum",
+      "Callionymus maculatus",
+      "Raja montagui",
+      "Amblyraja radiata",
+      "Raja clavata",
+      "Gasterosteus aculeatus",
+      "Lycodes vahlii")
+
+```
+
+
+
+#plot selection result
+```{r}
+
+cutoff = c(0.1,1,3)
+group.num = seq(5,10,1)
+
+length.cutoff <- list()
+time=1
+
+
+for (i in 1:length(group.num)) {
+  
+  for (j in 1:length(cutoff)) {
+  
+
+  length <- read.csv(paste0("data/initial_data/lengthgroup_specific/",
+                           group.num[i],"_lengthgroup/with_extreme/cutoff_",
+                           cutoff[j],"/filtered_species_",group.num[i],"_lengthgroup.csv")) %>%
+   filter(!species %in% mich.sp) %>% 
+   mutate(region_abbr=case_when(
+                #region == "Baltic Sea" ~ "BS",
+                region == "Eastern Bering Sea" ~ "EBS",
+                region == "North Sea" ~ "NS",
+                region == "Scottish West Coast" ~ "SWC"),
+           regional_pop = paste0(region_abbr,"-",species)) %>%
+   mutate(cutoff=paste0(cutoff[j],"%"),
+          lengthgroup=as.character(group.num[i])) %>%
+   select(regional_pop,cutoff,lengthgroup)
+  
+  length.cutoff[[time]] <- length
+  time=time+1
+  }
+ 
+}
+
+length.cutoff.all <- bind_rows(length.cutoff)
+
+length.cutoff.all <- length.cutoff.all %>%
+  group_by(regional_pop,cutoff) %>%
+  summarise(selected_times = n()) %>%
+  mutate(selected_lengthgroup_range = case_when(
+    selected_times == 1 ~ "5",
+    selected_times == 2 ~ "5~6",
+    selected_times == 3 ~ "5~7",
+    selected_times == 4 ~ "5~8",
+    selected_times == 5 ~ "5~9",
+    selected_times == 6 ~ "5~10"
+  ))
+
+
+length.cutoff.all$cutoff <- factor(length.cutoff.all$cutoff,levels = c("0.1%","1%","3%"))
+length.cutoff.all$selected_lengthgroup_range <- factor(length.cutoff.all$selected_lengthgroup_range,
+                                       levels = c("5","5~6","5~7","5~8","5~9","5~10"))
+
+ggplot(data=length.cutoff.all,aes(x=cutoff,y=regional_pop,color=selected_lengthgroup_range)) +
+  geom_point(size=3) +
+  scale_color_manual(values=c("red", "orange", "yellow","green","blue","black"))
+ggsave("figure/cutoff_use_and_num_lengthgroup_after_filtration.jpeg",width = 12,height = 8,dpi=300)
+```
+
+
+#get list for Michael - checking which populations cannot be used
+*All species meet Mich's selection, but not sure if there's region-specific concern (i.e., NS meets but SWC don't)*
+```{r}
+
+mich.list <- readxl::read_excel("data/raw_data/Kopia av north_sea_species_name.xlsx",1)
+sp.rmv <- mich.list %>%
+  filter(reliability=="F") %>%
+  select(-species,-reliability) %>%
+  rename(species=scientific_name)%>%
+  mutate(regional_pop=paste0("NS-",species))
+
+sp.keep <- mich.list %>%
+  filter(reliability=="T") %>%
+  select(-species,-reliability) %>%
+  rename(species=scientific_name)%>%
+  mutate(regional_pop=paste0("NS-",species))
+
+cutoff = c(0.1,1,3)
+group.num = seq(5,10,1)
+
+length.cutoff <- list()
+time=1
+
+
+for (i in 1:length(group.num)) {
+  
+  for (j in 1:length(cutoff)) {
+  
+
+  length <- read.csv(paste0("data/initial_data/lengthgroup_specific/",
+                           group.num[i],"_lengthgroup/with_extreme/cutoff_",
+                           cutoff[j],"/filtered_species_",group.num[i],"_lengthgroup.csv")) %>%
+   #filter(!species %in% sp.rmv$species) %>% 
+   mutate(region_abbr=case_when(
+                #region == "Baltic Sea" ~ "BS",
+                region == "Eastern Bering Sea" ~ "EBS",
+                region == "North Sea" ~ "NS",
+                region == "Scottish West Coast" ~ "SWC"),
+           regional_pop = paste0(region_abbr,"-",species)) %>%
+   mutate(cutoff=paste0(cutoff[j],"%"),
+          lengthgroup=as.character(group.num[i])) 
+  
+  length.cutoff[[time]] <- length
+  time=time+1
+  }
+ 
+}
+
+sp.all <- bind_rows(length.cutoff) %>%
+  select(region,species,regional_pop) %>%
+  unique() #%>%
+  #filter(region != "Eastern Bering Sea")
+
+sp.ns.swc <- sp.all %>%
+  filter(region != "Eastern Bering Sea")
+
+
+sp.ebs <- sp.all %>%
+  filter(region == "Eastern Bering Sea") %>%
+  mutate(reliable = "T")
+
+sp.ns.rmv <- sp.ns.swc %>% 
+  filter(regional_pop %in% sp.rmv$regional_pop) %>%
+  mutate(reliable = "F")
+
+sp.ns.keep <- sp.all %>%
+  filter(region == "North Sea") %>%
+  filter(regional_pop %in% sp.keep$regional_pop) %>%
+  mutate(reliable = "T")
+
+
+sp.swc <- sp.all %>% 
+  filter(region == "Scottish West Coast") %>%
+  mutate(reliable = case_when(
+    species %in% sp.keep$species ~ "T in NS",
+    species %in% sp.rmv$species ~ "F in NS",
+    !species %in% c(sp.keep$species,sp.rmv$species) ~ "undefined in NS"
+  ))
+
+sp.reliability <- bind_rows(sp.ebs,sp.ns.rmv,sp.ns.keep,sp.swc) %>%
+  arrange(reliable)
+
+write.csv(sp.reliability,file = "data/initial_data/sp_reliability.csv")
+
+
+```
+
+
+
+
+#plot abundance-length relation
+```{r}
+fish.all <- read.csv("data/initial_data/all_region_initial_clean.csv")
+
+fish.all <- fish.all %>% 
+  mutate(region_abbr= case_when(
+    region == "Eastern Bering Sea" ~ "EBS",
+    region == "North Sea" ~ "NS",
+    region == "Scottish West Coast" ~ "SWC"),
+    
+    regional_pop = paste0(region_abbr,"-",species)
+    )
+  
+
+fish.list <- unique(length.cutoff.all$regional_pop)
+num_pop=length(fish.list)
+
+
+
+for (i in 1:num_pop) {
+  
+
+fish <- fish.all %>% 
+  filter(regional_pop==fish.list[i]) %>%
+  group_by(region,species) %>% 
+  mutate(start_year=min(year),
+         end_year=max(year),
+         midpoint_year=floor(0.5*(start_year+end_year)),
+         period=ifelse(yearqua<=midpoint_year,
+                       paste(min(year),"-",midpoint_year),
+                       paste(midpoint_year,"-",max(year))))
+  
+
+
+
+ggplot(fish,aes(x=length, fill=period, color=period))+
+ geom_histogram(binwidth = 5,alpha=.5,position = "identity")+
+ 
+ geom_vline(aes(xintercept = median_length_lowerbound_0.1),linetype="dashed",color="red")+ 
+ geom_vline(aes(xintercept = median_length_upperbound_0.1),linetype="dashed",color="red")+
+  
+ geom_vline(aes(xintercept = median_length_lowerbound_1),linetype="dashed",color="black")+ 
+ geom_vline(aes(xintercept = median_length_upperbound_1),linetype="dashed",color="black")+
+  
+ geom_vline(aes(xintercept = median_length_lowerbound_3),linetype="dashed",color="purple")+ 
+ geom_vline(aes(xintercept = median_length_upperbound_3),linetype="dashed",color="purple")+
+
+ ggtitle(paste(unique(fish$species), " abun-lngt relationship"))+
+ theme(plot.title = element_text(hjust = .5))
+
+ ggsave(paste0("figure/abundance_length_relation/",unique(fish$regional_pop),".tiff"),width = 12,height = 8,dpi=300)
+ 
+}
+
+
+```
+
+
+
+
+
+
+
+
+
+
+

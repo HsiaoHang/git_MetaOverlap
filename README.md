@@ -8,7 +8,7 @@ a. The [data] folder contains following files:
 
 2. [a_common_name_all_stocks.csv] has scientific and corresponding common name for each species.
 
-Note: The North Sea and Scottish West Coast data are downloaded from ices data portal <https://datras.ices.dk/Data_products/Download/Download_Data_public.aspx> in the format of CPUE per length per subarea per year quarter. The eastern Bering Sea data and Baltic Sea data are available upon request to authors. 
+Note: The CPUE in the North Sea and Scottish West Coast regions are downloaded from ices data portal <https://datras.ices.dk/Data_products/Download/Download_Data_public.aspx> in the format of CPUE per length per subarea per year quarter. All the CPUE data (North Sea, Scottish West Coast, Eastern Bering Sea) are available upon request to authors.
 
 
 b.The [code] folder contains seven R scripts, which should be run sequentially from 01 to 07.

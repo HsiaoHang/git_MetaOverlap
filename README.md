@@ -11,7 +11,7 @@ a. The [data] folder contains following files:
 Note: The CPUE in the North Sea and Scottish West Coast regions are downloaded from ices data portal <https://datras.ices.dk/Data_products/Download/Download_Data_public.aspx> in the format of CPUE per length per subarea per year quarter. All the CPUE data (North Sea, Scottish West Coast, Eastern Bering Sea) are available upon request to authors.
 
 
-b.The [code] folder contains seven R scripts, which should be run sequentially from 01 to 07.
+b.The [code] folder contains eight R scripts, which should be run sequentially from 01 to 08.
 
 
 c. The [output] folder contains following files:
@@ -20,7 +20,7 @@ c. The [output] folder contains following files:
 
 2. [cpue.year.csv] is compiled time series of cpue per year for each population, generated from <05_calculate_indices.Rmd>
 
-3. [cpue.pair] is compiled time series of cpue per size group per year for each population, generated from <06_calculate_overlap_new>
+3. [cpue.pair] is compiled time series of cpue per size group per year for each population, generated from <06_calculate_overlap.Rmd>
 
 4. [co.dd.csv] is compiled time series of Alpha MLE for each size group pair of each population, generated from <07_calculate-cooccurrence.Rmd>
 

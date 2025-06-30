@@ -4,20 +4,20 @@ output: html_document
 editor_options: 
   chunk_output_type: inline
 ---
+
+This script divides each population into 5-10 size groups. Results from 5 size groups are presented in the paper.
+
 #Set working directory
 ```{r setup}
 
-# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+knitr::opts_knit$set(root.dir = ("/Users/hsiaohang.tao/Dropbox/academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/"))
 
-
-knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
 ```
 
 #library
 ```{r}
 
 library("tidyverse")
-
 
 ```
 
@@ -171,8 +171,6 @@ fish <- left_join(fish.lower,fish.upper)
 ```
 
 
-
-
 # <with loop>: Cut populations into 5 ~ 10 LengthGroups 
 ```{r}
 group.num <- seq(5,10,1)
@@ -223,8 +221,6 @@ Further cleaning and filtering of "species" & "Years with Incomplete LengthGroup
 *Note* 
 <Check1.> ~ <Check3.> are skippable. (Only for familiarizing dataset)
 Please see script 3 for further cleaning of fish.cut.length data
-
-
 
 
 # <Check1.> LengthGroup Conditions 

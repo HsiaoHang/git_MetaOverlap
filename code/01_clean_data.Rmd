@@ -5,13 +5,13 @@ editor_options:
   chunk_output_type: inline
 ---
 
+This script cleans the datasets. Note that data of the Baltic Sea is included in data preparation but is not used for publication, because of the limit in the number of populations in this region for testing two of three hypotheses.
+
+
 #Set working directory
 ```{r setup}
 
-# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
-
-
-knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+knitr::opts_knit$set(root.dir = ("/Users/hsiaohang.tao/Dropbox/academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/"))
 
 ```
 
@@ -58,7 +58,7 @@ ebs %>% group_by(species) %>% tally()
 ```{r}
 # bind all datasets
 fish.all <- bind_rows(ns, swc, bal, ebs)
-#fish.all <- bind_rows(ns, swc, ebs)
+
 ```
 
 #------------Cleaning Start--------------------
@@ -177,6 +177,7 @@ extreme.length.cutoff <- fish.all %>%
 ```{r}
 
 write.csv(extreme.length.cutoff,file= "data/initial_data/extreme_length_cutoff.csv")
+
 ```
 
 

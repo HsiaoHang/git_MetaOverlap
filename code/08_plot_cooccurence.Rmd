@@ -1,0 +1,1114 @@
+---
+title: "plot_cooccurence"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+This script generates all the graphs in the paper.
+
+#----- Call data & house keeping
+
+# Setup
+```{r setup}
+
+knitr::opts_knit$set(root.dir = ("/Users/hsiaohang.tao/Dropbox/Academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/"))
+
+```
+
+
+# library
+```{r}
+
+library("lme4")
+library("lmerTest")
+library("tidyverse")
+library("purrr")
+library("broom")
+library("forcats")
+library("viridis")
+library("boot")
+library("nlme")
+library("MuMIn")
+library("gridExtra")
+library("RColorBrewer")
+library("lmtest")
+library("stats")
+library("cowplot")
+library("synchrony")
+library("dplyr")
+library("stats")
+library("FactoMineR")
+library("factoextra")
+library("readxl")
+library("rfishbase")
+library(boot)
+library(khroma)
+
+```
+
+
+# read data & house keeping
+```{r}
+
+# read dd.co
+dd.co <- read.csv("output/co.dd.csv")
+
+dd.co <- dd.co %>% 
+  mutate(species = 
+           replace(species, 
+                   species == "Sprattus sp",
+                   "Sprattus sprattus"))
+
+# read cpue.year
+cpue.year <- read.csv('output/cpue.year.csv')
+
+cpue.year <- cpue.year %>% 
+  mutate(species = 
+           replace(species, 
+                   species == "Sprattus sp",
+                   "Sprattus sprattus"))
+
+
+# read trait data
+trait.b <- read_xlsx("data/Beukhof_2019_TraitData.xlsx",1)
+
+trait.b <- trait.b %>% 
+  rename(species.orginal = species,
+         species = taxon) 
+
+name.ref <- names(dplyr::select(trait.b,contains("reference")))
+
+trait.b <- trait.b %>% dplyr::select(-c(all_of(name.ref),
+                                 family,
+                                 genus,
+                                 species.orginal,
+                                 taxonomic.rank))
+
+
+
+# read common.name data
+common.name <- read.table("data/a_common_name_all_stocks.csv", sep = ";", header = TRUE)
+
+
+# read cpue.pair
+cpue.pair <- read.csv('output/cpue.pair.csv')
+
+```
+
+
+
+# merge trait and abundance data, create tibble [trait]
+```{r}
+
+#----- 1 North Sea (LME = 22)
+#Extract species list 
+ns.list <- cpue.year %>% filter(region == "North Sea") %>%
+  group_by(species)  %>% tally() %>% dplyr::select(-n)
+
+# filter to species in sp.list
+ns <- inner_join(ns.list, trait.b, by = "species")
+ns %>% group_by(species) %>% tally() # check num of sp
+ns <- ns %>% filter(LME == 22) # all sp has ns info
+ns$region <- "North Sea"
+
+# There are two Agonus cataphractus records in trait.b,so removed one.
+ns <- ns[2:nrow(ns),]
+
+#----- 2 SWC (LME = 24)
+#Extract species list 
+swc.list <- cpue.year %>% filter(region == "Scottish West Coast") %>%
+  group_by(species) %>% tally() %>% dplyr::select(-n)
+
+# filter to species in sp.list
+swc <- inner_join(swc.list, trait.b, by= "species")
+swc %>% group_by(species) %>% tally() 
+swc <- swc %>% filter(LME == 24) # all sp has info
+swc$region <- "Scottish West Coast"
+
+
+#-----3 Baltic Sea (LME = 23)
+# Extract species list 
+bs.list <- cpue.year %>% filter(region == "Baltic Sea") %>%
+  group_by(species) %>% tally() %>% dplyr::select(-n)
+
+# filter to species in sp.list
+bs <- inner_join(bs.list, trait.b, by= "species")
+bs %>% group_by(species) %>% tally() 
+bs <- bs %>% filter(LME == 23) # all sp has info
+bs$region <- "Baltic Sea"
+
+#----- 4 Eastern Bering Sea (LME = 1)(FAO = 67 Northeast Pacific)
+#Extract species list 
+ebs.list <- cpue.year %>% 
+  filter(region == "Eastern Bering Sea") %>%
+  group_by(species) %>% 
+  tally() %>% 
+  dplyr::select(-n)
+
+# filter to species in sp.list
+ebs <- inner_join(ebs.list, trait.b, by= "species")
+ebs %>% group_by(species) %>% tally()
+ebs <- ebs %>% filter(LME == 1 & FAO == 67) # all sp has info
+ebs$region <- "Eastern Bering Sea"
+
+#----- Join all species of each region together
+trait <- rbind(ns, swc, bs, ebs)
+
+#----- remove unnessary columns
+trait <- trait %>% dplyr::select(-c(LME,FAO))
+
+```
+
+# add common name to [trait] & [cpue.year]
+```{r}
+
+# add common name 
+trait <- left_join(trait, common.name, by = c("species", "region"))
+
+trait <- trait %>% relocate(common_name, .after = region)
+
+cpue.year <- left_join(cpue.year, common.name, by = c("species", "region"))
+
+cpue.year <- cpue.year %>% relocate(common_name, .after = region)
+
+```
+
+
+# [Table S1] create population trait table 
+
+```{r}
+
+(trait.table <- trait %>% 
+  dplyr::select(common_name,species, region, growth.coefficient,
+         age.maturity,age.max,length.infinity,
+         length.max,fecundity) %>% 
+  arrange(growth.coefficient) %>% 
+  mutate(growth.coefficient = round(growth.coefficient, 2),
+         age.maturity = round(age.maturity, 2),
+         age.max = round(age.max, 0),
+         length.infinity = round(length.infinity,0),
+         length.max = round(length.max, 0)
+         #,fecundity= round(fecundity / 1000, 2)
+                           ))
+  
+write_excel_csv(trait.table,"output/trait.table.csv")
+
+```
+
+
+# add alpha from <dd.co> to <cpue.pair> as a new column
+
+```{r}
+
+dd.co.rename <- dd.co %>% 
+  dplyr::select(region, species, year,
+                size_group_1,size_group_2,
+                alpha_mle) %>% 
+  rename(pair_id_x = size_group_1,
+         pair_id_y = size_group_2) %>% 
+  mutate_at('year', as.numeric)
+
+cpue.pair <- cpue.pair %>% 
+  separate(yearqua, into = c("year", "qua")) %>%
+  dplyr::select(-qua) %>%
+  mutate_at('year', as.numeric)
+
+cpue.pair <- left_join(cpue.pair, 
+                              dd.co.rename,
+           by = c('region','species','year',
+                  'pair_id_x','pair_id_y'))
+
+cpue.pair
+
+```
+
+
+# housekeeping <cpue.pair>
+
+```{r}
+
+# create [pair] from [cpue.pair]
+pair <- cpue.pair %>% 
+  mutate_at('pair_id', as.numeric) %>% 
+  rename('cpue_x' = 'cpue_length_yearqua_x',
+         'cpue_y' = 'cpue_length_yearqua_y',
+         'so' = 'area_overlap')
+
+# add group pair name
+pair <- pair %>% 
+  mutate_at('pair_id',as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+# add common name 
+pair <- pair %>% 
+  mutate(species = 
+           replace(species, 
+                   species == "Sprattus sp",
+                   "Sprattus sprattus"))
+
+pair <- left_join(pair, common.name, by = c("species", "region"))
+
+
+# calculate mean cpue of x and y
+pair <- pair %>% 
+  mutate(mean_cpue = (cpue_x + cpue_y)/2,
+         log_mean_cpue = log(mean_cpue)) 
+  
+  
+# prepare data for logit transformation 
+pair <- pair %>% 
+  mutate(so = replace(so, so == 1, 0.9999),
+         so = replace(so, so == 0, 0.0001),
+         logit_so = logit(so)) 
+
+# scale year
+fun_scale <- function(x){
+  (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
+}
+
+pair <- pair %>% 
+  mutate_at("year", as.numeric) %>%
+  mutate(scale_year = fun_scale(year)) 
+
+```
+
+
+
+# ----- Hypothesis I
+Test if slower-growth fish has lower co-occurrence by running pair-specific regression CO ~ maximum length
+
+## create [cpue.pair.k], [cpue.pair.k.mean]
+
+```{r}
+
+#1 create [trait.k] with only k as a life history trait
+trait.k <- trait %>% 
+  dplyr::select(region, common_name,length.max)
+
+#2 add common name to cpue.pair 
+cpue.pair.k <- left_join(cpue.pair, common.name, 
+                         by = c("region","species"))
+
+#3 add k to [cpue.pair.k]
+cpue.pair.k <- left_join(cpue.pair.k, trait.k, 
+          by = c("region","common_name") )
+
+# take mean area overlap for each pair across year
+cpue.pair.k.mean <- cpue.pair.k %>% 
+  group_by(region, common_name, pair_id) %>% 
+  mutate(mean_alpha_all_year = 
+              mean(alpha_mle),
+         sd_alpha_all_year= 
+           sd(alpha_mle))
+
+```
+
+
+##model to extract slope store in [output.so.k]
+```{r}
+
+# nest by pair_id, region
+cpue.pair.k.mean.nest  <- cpue.pair.k.mean %>% 
+  dplyr::select(pair_id,region, common_name, 
+         length.max, 
+         mean_alpha_all_year) %>%
+  group_by(pair_id, region) %>% 
+  nest() %>% 
+  filter(region != 'Baltic Sea')
+
+# create functions to run regression
+fun_trait_model_so <- function(df)gls(mean_alpha_all_year ~ 
+    length.max, 
+    na.action = na.omit, data = df)
+
+# create function to extract output
+fun_trait_extract_sep_so <-function(data){
+
+output.trait_so <- data %>% 
+  mutate(., slope = map_dbl(model, slope_fun),
+                intercept = map_dbl(model, intercept_fun),
+            lci = map_dbl(model, ci_lower_fun),
+            uci = map_dbl(model, ci_upper_fun),
+            p = map_dbl(model, p_value_fun)) %>%
+  dplyr::select(pair_id,region, intercept, slope,lci, uci, p)} 
+
+# apply two functions
+
+output.so.k <- cpue.pair.k.mean.nest %>% 
+  mutate(model = purrr::map(data, fun_trait_model_so))
+
+output.so.k <- fun_trait_extract_sep_so(output.so.k)
+
+
+# assign p-sig
+output.so.k <- output.so.k %>% 
+  mutate(p_sig = replace(p, p<0.05,"sig")) %>% 
+  mutate(p_sig = replace(p_sig, p > 0.05, "sig-non"))%>% 
+  relocate(p_sig,.after = "p")
+
+
+cpue.pair.k.mean.nest
+```
+
+
+## [Fig 2a] plot alpha~maximum length relationship by pair
+output 3 x 7
+```{r}
+
+cpue.pair.k.mean <- cpue.pair.k.mean %>%
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      "Eastern Bering Sea" ~ "3_Eastern Bering Sea")) %>%
+  mutate_at('pair_id', as.factor) %>%
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+
+# plot all pairs
+cpue.pair.k.mean %>%
+ggplot(.,aes(x = length.max,
+                 y = mean_alpha_all_year))+
+  geom_point(aes(color = group_pair), size = 0.1)+
+  geom_smooth(method = 'lm', se= F, aes(color = group_pair),
+              size = 0.4)+
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank())+
+  facet_wrap(vars(region), ncol = 3)+
+  ylab("Alpha MLE")+xlab('Maximum body size (cm)')+
+  facet_wrap(vars(region_reorder), ncol = 4,
+             labeller = labeller(region_reorder = 
+    c("1_North Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  #ylim(-3, 5)+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))
+
+
+```
+
+
+## [Fig 2b] forest plot
+output 4 x 6
+```{r}
+
+# add add <region_reorder> & <group_pair> to [output.so.k]
+output.so.k <- output.so.k %>% 
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North_Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      "Eastern Bering Sea" ~ "3_Eastern Bering Sea")) %>%
+  mutate_at('pair_id', as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+# forest plot
+output.so.k %>% 
+  ggplot(., 
+         aes(y = group_pair, x = slope))+
+  geom_point(shape = 16, aes(color = group_pair),
+             size = 2)+
+  geom_linerange(aes(xmin=lci, xmax=uci,
+                     linetype = p_sig),
+                 size = 0.5)+
+  facet_wrap(vars(region_reorder), ncol = 4,
+             labeller = labeller(region_reorder = 
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank()) +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, size=0.3, linetype = 'solid')+
+  xlab('slope and CI of Alpha MLE ~ Maximum body size')+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  scale_y_discrete(limits=rev)+
+  scale_x_continuous(breaks = seq(-0.02, 0, by = 0.01))
+
+
+```
+
+
+
+#-----Hypothesis II
+
+examine CO~abundance for each population
+
+#1. prepare [pair.nest] for applying functions
+
+```{r}
+
+pair.nest <- pair %>% 
+  ungroup() %>% 
+  dplyr::select(pair_id, region, common_name, 
+         scale_year, 
+         log_mean_cpue,
+         logit_so,
+         alpha_mle) %>%
+  group_by(pair_id, region, common_name) %>% 
+  nest()
+
+```
+
+
+#2. create function to model CO~abundance for each pair, store in [mod.data.pair]
+
+```{r}
+
+# create the function
+fun_pair_slope <- function(df)gls(alpha_mle~ 
+    log_mean_cpue + scale_year, 
+  na.action = na.omit, data = df)
+
+# run the function
+pair.nest <- pair.nest %>% dplyr::filter(region != 'Baltic Sea')
+
+mod.data.pair <- pair.nest %>% 
+  mutate(model = purrr::map(data, fun_pair_slope))
+
+
+```
+
+
+#3. create function to extract slope & CI and run, from [mod.data.pair], store in [output.pair]
+
+```{r}
+
+# functions to extract slope & CI from model
+slope_fun <- function(mod)coefficients(mod)[[2]]
+ci_lower_fun <- function(mod) confint(mod)[2,1]
+ci_upper_fun <- function(mod) confint(mod)[2,2]
+p_value_fun <- function(mod)summary(mod)$tTable[2,4]
+resid_fun <- function(mod)resid(mod)
+AIC_fun <- function(mod)AIC(mod)
+intercept_fun <- function(mod)coefficients(mod)[[1]]
+
+fun_extract_mod <-function(data){
+  output <- data %>% 
+  dplyr::mutate(., slope = map_dbl(model, slope_fun),
+            lci = map_dbl(model, ci_lower_fun),
+            uci = map_dbl(model, ci_upper_fun),
+            p = map_dbl(model, p_value_fun)) %>%
+  dplyr::select(pair_id, region, common_name, slope, lci, uci, p)
+} 
+
+# apply functions
+output.pair <- fun_extract_mod(mod.data.pair)
+
+```
+
+
+#4 plot [Fig 3b]: beta for all populations per region 
+output 6 x 9
+```{r}
+
+# prepare [output.pair] for plot
+## 1 add p_sig
+output.pair <- output.pair %>% 
+  mutate(p_sig = replace(p, p<0.05,"sig")) %>% 
+  mutate(p_sig = replace(p_sig, p > 0.05, "sig-non"))%>% 
+  relocate(p_sig,.after = "p") %>% 
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      #'Baltic Sea' ~ '3_Baltic Sea',
+      "Eastern Bering Sea" ~ "4_Eastern Bering Sea"))
+
+## 2 add trait to reorder common_name
+trait.name.k <- trait %>% 
+  dplyr::select(region, common_name, length.max)
+
+output.pair <- inner_join(output.pair, trait.name.k, 
+           by = c('region','common_name'))
+
+output.pair$common_name <-
+  fct_reorder(output.pair$common_name,                                 desc(output.pair$length.max))
+
+
+# add column group_pair
+output.pair <- output.pair %>% 
+  mutate_at('pair_id',as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+output.pair %>% 
+ggplot(data=., 
+       aes(y=common_name, x=slope)) +
+  geom_linerange(aes(xmin= lci, xmax= uci, alpha = 0.5, 
+                     color = group_pair,
+                     linetype = p_sig),
+                 position=position_jitter(w=0, h=0.25))+ 
+  facet_wrap(vars(region_reorder), ncol = 4,
+             labeller = labeller(region_reorder = 
+    c("1_North Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      #"3_Baltic Sea" = "Baltic Sea",
+      "4_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  geom_point(shape = 16,size = 0.01,
+             aes(color = group_pair)) + 
+  theme_bw()+
+  guides(color = guide_legend(reverse=TRUE))+
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, linetype = 'dashed', size = 0.3)+
+  xlab('beta SO +- se')+ ylab('')+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  #xlim(-2, 4)+
+  geom_jitter(aes(color = group_pair),
+              width = 0.05, height = 0.25)
+ 
+```
+
+
+#5. plot [Fig 3a]: example population for each region
+output 6 x 8
+```{r}
+
+# plot function
+function_plot_example <- function(data, ggtitle){
+  #@20250121 y change to alpha_mle
+  ggplot(data = data, 
+       aes(x = log_mean_cpue, 
+           y = alpha_mle)) +
+  geom_point(aes(color = group_pair),
+             shape = 16)+
+  geom_smooth(method = "lm", formula = y~x, se = F,  
+              aes(color = group_pair),
+              size = 0.5)+
+  theme_bw()+
+  xlab("mean abundance of the pair (log transformed)") +
+  ylab("co-occurrence (alpha mle)") +
+  # remove background
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank())+
+  ggtitle(ggtitle)+
+     scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134',
+           '#FF6E3A','#FFC33B',"#000000"))
+  }
+
+
+# extract 1 fish per region
+
+pair.ns <- pair %>% 
+  filter(region == 'North Sea' &
+           common_name == 'Atlantic cod') %>% 
+  mutate_at('group_pair', as.factor)
+
+pair.swc <- pair %>% 
+  filter(region == 'Scottish West Coast' &
+           common_name == 'Red gurnard') %>% 
+  mutate_at('group_pair', as.factor)
+
+# pair.bal <- pair %>% 
+#   filter(region == 'Baltic Sea' &
+#            common_name == 'Sprat') %>% 
+#   mutate_at('group_pair', as.factor)
+
+pair.ebs <- pair %>% 
+  filter(region == 'Eastern Bering Sea' &
+           common_name == 'Pacific halibut') %>% 
+  mutate_at('group_pair', as.factor)
+
+a1 <- function_plot_example(pair.ns,'N.S. Atlantic cod')
+a2 <- function_plot_example(pair.swc, 'S.W.C. Hooknose')
+#a3 <- function_plot_example(pair.bal, 'B.S. Sprat')
+a4 <- function_plot_example(pair.swc, 'E.B.S. Pacific halibut')
+
+grid.arrange(a1, a2, a4, ncol=2)
+
+```
+
+
+
+# 6 ratio of positive relationships
+
+```{r}
+
+# number of negative & positive relationships
+
+output.pair %>% 
+  filter(slope < 0) # 165
+
+output.pair %>% 
+  filter(slope > 0) # 375
+
+
+# total number of relationships: 54 populations x 10 size group pairs = 540 
+
+165+375 # sum = 540
+
+# ratio of positive relationship / all relationship
+165/540 # 31%
+375/540 # 69%
+
+
+```
+
+#7 ratio of sig over all relationships
+
+```{r}
+
+# ratio of signigicance out of all positive relationships
+output.pair %>% 
+  # 375 pairs showed slope >0
+  filter(slope > 0) %>% 
+  # 84 of them is significant
+  filter(p_sig == 'sig')
+
+# ratio 
+84/375 # 22%
+84/540 # 15% out of all pairs
+
+# ratio of signigicance out of all negative relationships
+output.pair %>% 
+  # 165 pairs showed slope <0
+  filter(slope < 0) %>% 
+  # 17 of them is significant
+  filter(p_sig == 'sig')
+
+# ratio 
+17/165 # 10%
+17/540 # 3% out of all pairs
+
+
+
+```
+
+
+#8 check proportion sig with population
+
+```{r}
+
+# number of population with more than 50% of size group pairs with significant positive relationship
+
+output.pair %>% 
+  group_by(p_sig, region, common_name, slope) %>%
+  filter(slope > 0 & p < 0.05) %>% 
+  group_by(region, common_name) %>% 
+  tally() %>% 
+  filter(n>4)
+  
+
+```
+
+# 9 check by region
+
+result:
+number of populations in each region: 2,8,27,19
+number of populations with more than 50% group has sig p: 0,3,21,9
+
+```{r}
+
+# number of populations in each region: 2,8,27,19
+output.pair %>% filter(pair_id == 1) %>% group_by(region) %>% tally
+  
+
+
+```
+
+# 10 check proportion sig with pair id
+Result
+pair_id: 61%-79% are significant
+prop_sig from high to low: 5,1,8,10,9,6,2,4,7,3
+```{r}
+
+output.pair %>% 
+  group_by(pair_id, group_pair,p_sig) %>%
+  tally() %>% 
+  rename(number = n) %>% 
+  pivot_wider(names_from = p_sig, values_from = number) %>% 
+  rename(sig_non = 4) %>% 
+  mutate(sum = sig+ sig_non) %>% 
+  mutate(prop_sig = sig / sum) %>% 
+  arrange(desc(prop_sig))
+  
+```
+
+
+#-----Hypothesis III
+
+between populations: examine betaCO ~ life history 
+
+# prepare data
+join [output.pair] with [trait] to :
+1. prepare [trait.pair] to make a graph, and 
+2. prepare [trait.pair.nest] to model beta ~ length.max
+```{r}
+
+#1 select 4 additional life history traits, create [trait.4]
+trait.4 <- trait %>% ungroup() %>% 
+  dplyr::select(region, common_name,
+                age.maturity, length.infinity,
+                age.max, growth.coefficient, length.max)
+
+#2 merge [trait.4] and [output.pair]
+trait.pair <- left_join(output.pair, trait.4, by = c("region","common_name"))
+
+#2 group trait.pair, create [trait.pair.sep]
+trait.pair.nest <- trait.pair %>% 
+  pivot_longer(c(growth.coefficient, age.maturity,
+                 length.infinity,length.max,
+                 age.max),
+               names_to = "trait.name",
+               values_to = "trait.value")
+
+#3 nest by pair_id, region, response, trait.name
+trait.pair.nest  <- trait.pair.nest  %>% 
+  dplyr::select(pair_id,region, common_name, 
+         slope, trait.name, trait.value) %>%
+  group_by(pair_id, region, trait.name) %>% 
+  nest()
+
+```
+
+
+# model beta ~ life history, create [output.pair.beta]
+```{r}
+
+# function: model beta
+fun_trait_model <- function(df)gls(slope ~ 
+    trait.value, na.action = na.omit, data = df)
+
+# function: extract output
+fun_trait_extract_sep <-function(data){
+
+output.trait <- data %>% 
+  mutate(., slope = map_dbl(model, slope_fun),
+                intercept = map_dbl(model, intercept_fun),
+            lci = map_dbl(model, ci_lower_fun),
+            uci = map_dbl(model, ci_upper_fun),
+            p = map_dbl(model, p_value_fun)) %>%
+  dplyr::select(pair_id,region, trait.name, slope, intercept, lci, uci, p)
+
+} 
+
+# apply function
+output.pair.beta <- trait.pair.nest %>% 
+  mutate(model = purrr::map(data, fun_trait_model))
+
+output.pair.beta <- fun_trait_extract_sep(output.pair.beta)
+
+output.pair.beta <- output.pair.beta %>% arrange(trait.name)
+
+#5 assign p-sig
+output.pair.beta <- output.pair.beta %>% 
+  mutate(p_sig = replace(p, p<0.05,"sig")) %>% 
+  mutate(p_sig = replace(p_sig, p > 0.05, "sig-non"))%>% 
+  relocate(p_sig,.after = "p")
+  
+```
+
+
+# calculate trait range, expected y, save [output.pair.beta]
+This is to prepare for xyplot of beta ~ life history
+Steps:
+1. use [trait.pair.nest] trait values to generate max and min trait <trait.max> <trait.min> , store in [x.max.min]
+2. join [x.max.min] to [output.pair.beta]
+3. in [output.pair.beta] calculate <trait.yend> using intercept, slope, and trait.max
+
+```{r}
+
+# extract x range (it is region-specific depending on which species included in each region)
+
+#1 data
+trait.pair.nest
+  
+#2 function to extract x range
+fun_x <- function(df){
+  df %>%
+    summarise(trait.min = min(trait.value),
+              trait.max = max(trait.value))}
+
+#3 apply function
+x.max.min <- trait.pair.nest %>%
+  ungroup() %>% 
+  group_by(region) %>% 
+  mutate(output = purrr::map(data, fun_x))
+
+#4 arrange output to create a x range table
+x.max.min  <- x.max.min  %>% 
+  ungroup() %>% 
+  dplyr::select(pair_id, region, trait.name, output) %>% 
+  unnest(cols = c(output))
+
+
+# add x range to out.trait.sep
+output.pair.beta <- 
+  left_join(output.pair.beta, x.max.min, 
+            by = c('pair_id',"region", "trait.name"))
+
+# calculate y range (ymin = intercept so not need to calculate. Only calculate yend)
+output.pair.beta <- output.pair.beta  %>% 
+  mutate(trait.yend = intercept + slope * trait.max)
+
+
+```
+
+# re-order region, rename pair for [trait.pair] [output.pair.beta]
+```{r}
+
+# check pair id of x & y
+cpue.pair %>% 
+  group_by(pair_id) %>% 
+  summarise(x = mean(pair_id_x),
+            y = mean(pair_id_y))
+
+# for trait.pair
+trait.pair <- 
+  trait.pair %>%
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North_Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      "Eastern Bering Sea" ~ "3_Eastern Bering Sea")) %>%
+  mutate_at('pair_id', as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+# for output.pair.beta
+output.pair.beta <- 
+  output.pair.beta %>%
+  mutate(region_reorder = case_match(region,
+      "North Sea" ~ "1_North_Sea",
+      "Scottish West Coast"~ "2_Scottish West Coast",
+      "Eastern Bering Sea" ~ "3_Eastern Bering Sea")) %>%
+  mutate_at('pair_id', as.factor) %>% 
+  mutate(group_pair = case_match(pair_id,
+                              '1' ~ '1-2',
+                              '2' ~ '1-3',
+                              '3' ~ '1-4',
+                              '4' ~ '1-5',
+                              '5' ~ '2-3',
+                              '6' ~ '2-4',
+                              '7' ~ '2-5',
+                              '8' ~ '3-4',
+                              '9' ~ '3-5',
+                              '10' ~ '4-5'))
+
+
+```
+
+
+# plot [Fig 4a]: CO ~ max length in xy plot
+
+```{r}
+
+
+# using [output.pair.beta] to: 
+## 1 create [slope.pair], for adding to ggplot2 to assign trait.min, trait.max, intercept, trait.yend
+
+slope.pair <- output.pair.beta %>% 
+    filter(trait.name == "length.max") %>% 
+  mutate_at('group_pair', as.factor)
+
+## 2 create [line.type], for assigned line types 
+slope.pair.line <- ifelse(slope.pair$p_sig =="sig", 
+                               "solid", "dashed")
+
+
+# plot all pairs
+trait.pair %>%
+ggplot(.,aes(x = length.max,
+                 y = slope, ymin =lci, ymax = uci))+
+  geom_pointrange(aes(color = group_pair),
+                  shape = 16, size = 0.3) +
+  # geom_smooth(method = 'lm', aes(color = pair_id),
+  #             se = FALSE, size = 0.5)+
+  geom_segment(data = slope.pair,
+      aes(x = trait.min, xend = trait.max, 
+          y = intercept, yend = trait.yend,
+          color = group_pair), 
+      size = 0.4,
+      lty = slope.pair.line)+
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.position="none")+
+  facet_wrap(vars(region_reorder), ncol = 3,
+             labeller = labeller(region_reorder = 
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  ylab("pair-specific beta")+
+  ylim(-3, 5)+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  xlab('Maximum body size (cm)')+
+  ylab('betaCO')
+
+
+
+
+# another color example
+colorBlindBlack8  <- c("#000000", "#E69F00", "#56B4E9", "#009E73",
+                       "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+
+
+```
+
+
+# plot [Fig 4b]: forest plot beta CO ~ max length
+
+```{r}
+  
+output.pair.beta %>% 
+  mutate_at('pair_id', as.factor) %>%
+  filter(trait.name == 'length.max') %>% 
+  ggplot(., 
+         aes(y = group_pair))+
+  geom_point(aes(x = slope,color = pair_id), 
+             shape = 16, size = 3)+
+  geom_linerange(aes(xmin=lci, xmax=uci,
+                     linetype = p_sig, alpha = 0.5),
+                 size = 0.8)+
+  facet_wrap(vars(region_reorder),
+             labeller = labeller(region_reorder = 
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank()) +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, size=0.3, linetype = 'solid')+
+  xlab('betaCO-maximum body size (slope +- CI)')+
+  ylab('')+
+  scale_y_discrete(limits=rev)
+
+
+```
+
+
+# plot [Fig S1] plot other life history traits
+
+```{r}
+
+plot.life.history <- function(life.history, title){
+  output.pair.beta %>% 
+  mutate_at('pair_id', as.factor) %>%
+  filter(trait.name == life.history) %>% 
+  ggplot(., 
+         aes(y = group_pair))+
+  geom_point(aes(x = slope,color = pair_id), 
+             shape = 16, size = 3)+
+  geom_linerange(aes(xmin=lci, xmax=uci,
+                     linetype = p_sig, alpha = 0.5),
+                 size = 0.8)+
+  facet_wrap(vars(region_reorder),
+             labeller = labeller(region_reorder =
+    c("1_North_Sea" = "North Sea",
+      "2_Scottish West Coast" = "Scottish West Coast",
+      "3_Eastern Bering Sea" = "Eastern Bering Sea")))+
+  scale_color_manual(values = c('#9F0162','#009F81','#8400CD','#008DF9',
+           '#00C2F9','#FFB2FD','#E20134','#FF6E3A','#FFC33B',"#000000"))+
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank()) +
+  scale_y_discrete(limits=rev)+
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, size=0.3, linetype = 'solid')+
+  xlab('')+
+  ggtitle(title)
+}
+
+# traits: age.maturity,age.max,length.infinity,length.max, fecundity
+
+p1 <- plot.life.history('length.infinity','Infinite body size')
+p2 <- plot.life.history('age.max','Maximum age')
+p3 <- plot.life.history('age.maturity','age at maturity')
+p4 <- plot.life.history('growth.coefficient','growth coefficient k')
+
+grid.arrange(p1, p2, p3,p4, ncol=2)
+```
+
+
+
+
+#-------statistics
+# summary: list of stocks
+```{r}
+
+
+# number of stocks per region
+# 27 NS, SWC 19, EBS 8 
+cpue.pair %>% group_by(region) %>% 
+  summarise(number_species = n_distinct(species))
+
+# total number of stocks: 54
+cpue.pair %>% group_by(region, species) %>% 
+  tally()
+
+# total number of species: 38
+cpue.pair %>% group_by(species) %>% 
+  summarise(number_species = n_distinct(species))
+
+```
+
+
+

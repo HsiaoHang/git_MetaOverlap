@@ -1,0 +1,51 @@
+﻿"common_name","species","region","growth.coefficient","age.maturity","age.max","length.infinity","length.max","fecundity"
+"Saithe","Pollachius virens","North Sea",0.07,4.17,25,168,130,4535500
+"Pacific halibut","Hippoglossus stenolepis","Eastern Bering Sea",0.07,13,55,174,215,2400000
+"Greenland turbot","Reinhardtius hippoglossoides","Eastern Bering Sea",0.08,9.57,33,115,130,70000
+"Alaska plaice","Pleuronectes quadrituberculatus","Eastern Bering Sea",0.1,6.33,37,57,87,120054
+"Yellowfin sole","Limanda aspera","Eastern Bering Sea",0.1,6.7,34,43,49,1982681
+"Arrowtooth flounder","Atheresthes stomias","Eastern Bering Sea",0.1,6,23,91,84,1295000
+"Flathead sole","Hippoglossoides elassodon","Eastern Bering Sea",0.1,5.32,27,58,52,336000
+"European hake","Merluccius merluccius","North Sea",0.11,3.41,20,108,86,1834284.643
+"Plaice","Pleuronectes platessa","Scottish West Coast",0.12,4,30,58,100,552000
+"European hake","Merluccius merluccius","Scottish West Coast",0.12,3.41,20,110,86,1834284.643
+"Megrim","Lepidorhombus whiffiagonis","North Sea",0.12,2.83,16,58,47,500000
+"Megrim","Lepidorhombus whiffiagonis","Scottish West Coast",0.13,2.83,16,59,47,500000
+"Picked dogfish","Squalus acanthias","Scottish West Coast",0.15,8.82,75,90,110,11
+"Plaice","Pleuronectes platessa","North Sea",0.15,3.5,30,51,100,552000
+"Whiting","Merlangius merlangus","Scottish West Coast",0.16,2,20,60,46,381095
+"Grey gurnard","Eutrigla gurnardus","North Sea",0.16,2.77,21,46,36,244949
+"Grey gurnard","Eutrigla gurnardus","Scottish West Coast",0.16,2.77,21,46,36,244949
+"Angler","Lophius piscatorius","North Sea",0.17,4.5,24,122,140,1500000
+"Haddock","Melanogrammus aeglefinus","Scottish West Coast",0.21,2.62,20,68,76,969000
+"Atlantic cod","Gadus morhua","North Sea",0.22,4,25,120,116,5900000
+"Walleye pollock","Gadus chalcogrammus","Eastern Bering Sea",0.22,4,28,104,111,1410683.333
+"Pacific cod","Gadus macrocephalus","Eastern Bering Sea",0.22,5.8,25,104,122,2060000
+"Haddock","Melanogrammus aeglefinus","North Sea",0.23,2.62,20,62,76,875571
+"Witch flounder","Glyptocephalus cynoglossus","North Sea",0.24,7.89,25,42,78,100000
+"Argentine","Argentina sphyraena","Scottish West Coast",0.28,2.5,16,22,22,10000
+"Common dab","Limanda limanda","Scottish West Coast",0.29,2.65,12,31,44,236000
+"Whiting","Merlangius merlangus","North Sea",0.3,2,20,46,46,381095
+"Common dab","Limanda limanda","North Sea",0.31,2.65,12,29,44,236000
+"Common sole","Solea solea","North Sea",0.31,2.94,26,36,60,300000
+"Atlantic herring","Clupea harengus","Scottish West Coast",0.32,3.22,13,30,26,141075
+"American plaice","Hippoglossoides platessoides","North Sea",0.34,7.62,30,25,83,762611
+"American plaice","Hippoglossoides platessoides","Scottish West Coast",0.34,7.62,30,25,83,762611
+"Atlantic herring","Clupea harengus","North Sea",0.34,3.22,18,32,26,37783
+"Herring","Clupea harengus","Baltic Sea",0.35,3.22,14,26,26,141075
+"Atlantic mackerel","Scomber scombrus","North Sea",0.35,2.18,21,41,50,598563
+"European flounder","Platichthys flesus","North Sea",0.36,3.8,15,41,58,1177674
+"Lemon sole","Microstomus kitt","North Sea",0.36,4,23,38,67,95000
+"Lemon sole","Microstomus kitt","Scottish West Coast",0.36,4,23,38,67,95000
+"Poor cod","Trisopterus minutus","Scottish West Coast",0.41,2,8,22,24,363667
+"Dragonet","Callionymus lyra","North Sea",0.47,2.5,7,21,30,5000
+"Dragonet","Callionymus lyra","Scottish West Coast",0.47,2.5,7,21,30,5000
+"Pouting","Trisopterus luscus","North Sea",0.47,1.5,6,46,46,521738
+"Red gurnard","Chelidonichthys cuculus","Scottish West Coast",0.49,3.5,17,39,34,57500
+"Poor cod","Trisopterus minutus","North Sea",0.51,2,8,20,24,363667
+"Atlantic mackerel","Scomber scombrus","Scottish West Coast",0.51,2.18,21,37,50,598563
+"Norway pout","Trisopterus esmarkii","North Sea",0.56,1.69,5,21,21,205595
+"Norway pout","Trisopterus esmarkii","Scottish West Coast",0.56,1.69,5,21,21,205595
+"Sprat","Sprattus sprattus","North Sea",0.6,2,6,15,14,14630
+"Sprat","Sprattus sprattus","Scottish West Coast",0.6,2,6,15,15,14630
+"Sprat","Sprattus sprattus","Baltic Sea",0.6,2,6,15,14,14630

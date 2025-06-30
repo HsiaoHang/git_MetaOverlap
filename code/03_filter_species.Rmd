@@ -4,12 +4,14 @@ output: html_document
 editor_options: 
   chunk_output_type: inline
 ---
+
+This script filters populations out based on criteria 1-3 (see Methods section of the paper).
+
 #Set working directory
 ```{r setup}
 
-# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+knitr::opts_knit$set(root.dir = ("/Users/hsiaohang.tao/Dropbox/academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/"))
 
-knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
 ```
 
 #library
@@ -17,7 +19,10 @@ knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Ov
 library("tidyverse")
 ```
 
-#Mich species
+# species in which the survey data is not reliable 
+
+we removed additional 19 species from the North Sea and the Scottish West Coast due to concerns about the consistency of long-term sampling and reporting in the DATRAS database (Barbara Bland, personal communication, 
+
 ```{r}
 
 mich.sp <- c("Leucoraja naevus",
@@ -208,58 +213,4 @@ for (i in 1:length(group.num)) {
 }
 
 ```
-
-
-
-
-#<without loop>: Species selection step by step
-*5 length-groups & 1% cutoff as example in the following*
-```{r}
-
-# Can't read the file, not sure why,so I wrote a directory to the file.
-
-# group.num=5
-# cutoff=1
-# 
-# all.fish.length <- read.csv(paste0("data/initial_data/lengthgroup_specific/",group.num,"_lengthgroup/with_extreme/cutoff_",cutoff,"/",group.num,"_length_group_cut.csv"))
-
-all.fish.length <- read.csv("data/initial_data/lengthgroup_specific/5_lengthgroup/with_extreme/cutoff_1/5_lengthgroup_cut.csv")
-
-
-
-
-all.fish.length <- all.fish.length %>%
-  select(-X)
-
-all.fish.length %>% select(region,species) %>% unique()
-
-#step2
-#<Key1>
-fish.selection.mean.cpue.year <- get_key1_mean_cpue_year(all.fish.length,
-                                                         critical.mean.cpue.year = 50)
-#<Key2>
-fish.selection.evenness.cpue <- get_key2_evenness_cpue(all.fish.length,
-                                                       critical.total.cpue.year = 25)
-#<Key3>
-fish.selection.group.num <- get_key3_group_num(all.fish.length,
-                                               critical.group.num = round(0.8*group.num),
-                                               all.group.num = group.num)
-
-
-sp.filter.key.temp <- inner_join(fish.selection.mean.cpue.year,
-                                fish.selection.evenness.cpue)
-sp.filter.key <- inner_join(sp.filter.key.temp,
-                           fish.selection.group.num)
-
-sp.filter.key <- sp.filter.key %>%
-  relocate("region", .before = "species")
-
-
-#step3.
-write.csv(sp.filter.key, file = "data/initial_data/lengthgroup_Specific/5_lengthgroup/with_extreme/cutoff_1/filtered_species_5_lengthgroup.csv")
-
-sp.filter.key 
-
-```
-
 

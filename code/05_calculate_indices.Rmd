@@ -2,19 +2,20 @@
 title: "05_Nlengthgroup_RangeCompiling"
 output: html_document
 ---
+
+This script compiles cpue data.
+
 #Set working directory
 ```{r setup}
 
-# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
+knitr::opts_knit$set(root.dir = ("/Users/hsiaohang.tao/Dropbox/academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/"))
 
-knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
 ```
 
 #library
 ```{r}
 
 library("tidyverse")
-
 
 ```
 
@@ -182,16 +183,15 @@ cpue.year <- get_species_yearly_data(cpue.length.year)
 ```
 
 
+#-----------------Save csv-----------------------
 
+# save cpue.length.subarea.yearqua & cpue.year
+```{r}
 
+write.csv(cpue.length.subarea.yearqua, "output/cpue.length.subarea.yearqua.csv",row.names=F)
 
+write.csv(cpue.year, "output/cpue.year.csv",row.names=F)
 
-
-
-
-
-
-
-
+```
 
 

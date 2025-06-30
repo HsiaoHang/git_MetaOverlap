@@ -4,13 +4,14 @@ output: html_document
 editor_options: 
   chunk_output_type: inline
 ---
+
+This script synchronizes the format of all dataset.
+
 #Set working directory
 ```{r setup}
 
-# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file("/Users/jhih-shengliu/Desktop/Fish_overlap/NS-IBTS/NS-IBTS_JSL/"))
 
-
-knitr::opts_knit$set(root.dir = ("/Users/sha/Documents/Ecoinformatics/a1_Meta_Overlap/Analysis/"))
+knitr::opts_knit$set(root.dir = ("/Users/hsiaohang.tao/Dropbox/academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/"))
 
 
 ```

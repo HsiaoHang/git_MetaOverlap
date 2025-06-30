@@ -1,0 +1,208 @@
+---
+title: "coocurrence"
+output: html_document
+date: "2025-01-10"
+editor_options: 
+  chunk_output_type: inline
+---
+
+This script calculates co-occurrence index Alpha-MLE.
+
+#Set working directory
+```{r setup}
+
+knitr::opts_knit$set(root.dir = ("/Users/hsiaohang.tao/Dropbox/academic/Ecoinformatics/a1_Meta_Overlap/analysis_meta_overlap/"))
+
+```
+
+
+
+# library
+```{r}
+library(dplyr)
+library(tidyverse)
+library(CooccurrenceAffinity)
+library(cooccur)
+library(data.table)
+library(mapplots)
+```
+
+
+
+
+# read data
+```{r}
+getwd()
+
+dd <- read.csv("output/cpue.length.subarea.yearqua.csv")
+
+
+# check data length of Baltic Sea
+cpue.length.subarea.yearqua %>% filter(region == "Baltic Sea", species == "Clupea harengus") %>% 
+  group_by(yearqua) %>% 
+  tally()
+
+```
+
+
+
+# create function to calculate Alpha MLE 
+In the function, each region is cut to two halves and run separately to accommodate comutation power 
+
+split to each region and convert to wide form so that N for each region is specific
+
+consider to assign N = max(ma,mb)
+Or split to each region + species
+so N for each region and species is specific.
+Otherwise, for example in north sea, N is always 198
+while the spatial range of a species can be much less limited
+
+```{r}
+
+co_fun <- function(data, region_name, divide){
+  d1 <- dd %>% 
+  dplyr::select(region, species, yearqua, subarea,length_group, cpue_length_subarea_yearqua) 
+
+d1 <- d1 %>% 
+  filter(region == region_name) %>% 
+  group_by(species, yearqua, length_group) %>% 
+  pivot_wider(names_from = subarea,
+              values_from = 
+                cpue_length_subarea_yearqua) %>% 
+  mutate_if(is.numeric, ~1 * (. != 0)) %>%
+  replace(is.na(.), 0) %>% 
+  ungroup() %>% 
+  group_by(region, species, yearqua) %>% 
+  mutate_at('length_group', as.factor)
+  
+d.list <- group_split(d1)
+
+# convert to dataframe
+d.list <- map(d.list, as.data.frame)
+
+# test by 4 lists
+#d.list <- d.list[c(1:4)]
+
+# subset list by two
+if (divide == 1){d.list.sub <- d.list[c(1:(length(d.list)/2))]}else{
+  d.list.sub <- d.list[c(((length(d.list)/2)+1):length(d.list))]
+}
+
+# loop
+out <- list(NA)
+
+for (i in 1:length(d.list.sub)){
+  out[i] <- affinity(data = d.list.sub[[i]][,5:ncol((d.list.sub)[[i]])], 
+                       row.or.col = "row")[1]
+  }
+print(out)
+}
+
+```
+
+
+# run co-occurence function
+```{r}
+
+# run co_fun 
+out.ns.1 <- co_fun(dd, 'North Sea', 1)
+out.ns.2 <- co_fun(dd, 'North Sea', 2)
+out.swc.1 <- co_fun(dd, 'Scottish West Coast', 1)
+out.swc.2 <- co_fun(dd, 'Scottish West Coast', 2)
+out.ebs.1 <- co_fun(dd, 'Eastern Bering Sea', 1)
+out.ebs.2 <- co_fun(dd, 'Eastern Bering Sea', 2)
+out.bs.1 <- co_fun(dd, 'Baltic Sea', 1)
+out.bs.2 <- co_fun(dd, 'Baltic Sea', 2)
+
+# check
+out.ns.1[[1]]
+
+# bind two halves for each region
+out.ns <- c(out.ns.1, out.ns.2)
+out.swc <- c(out.swc.1, out.swc.2)
+out.ebs <- c(out.ebs.1, out.ebs.2)
+out.bs <- c(out.bs.1, out.bs.2)
+
+
+```
+
+
+# house-keeping
+```{r}
+
+# create tibble of region, species, yearqua
+d.name <- function(region_name) {dd %>% 
+  separate(yearqua, into = c("year", "qua")) %>% 
+  dplyr::select(region, species, year) %>%
+  filter(region == region_name) %>% 
+  unique()}
+
+ns.name <- as.data.frame(d.name('North Sea'))
+swc.name <- as.data.frame(d.name('Scottish West Coast'))
+ebs.name <- as.data.frame(d.name('Eastern Bering Sea'))
+bs.name <- as.data.frame(d.name('Baltic Sea'))
+
+# bind name tibble with co-occurrence outputs
+for(i in 1:length(out.ns)){
+out.ns[[i]]$region <- ns.name[i,1]
+out.ns[[i]]$species <- ns.name[i,2]
+out.ns[[i]]$year <- ns.name[i,3]}
+
+for(i in 1:length(out.swc)){
+out.swc[[i]]$region <- swc.name[i,1]
+out.swc[[i]]$species <- swc.name[i,2]
+out.swc[[i]]$year <- swc.name[i,3]}
+
+for(i in 1:length(out.ebs)){
+out.ebs[[i]]$region <- ebs.name[i,1]
+out.ebs[[i]]$species <- ebs.name[i,2]
+out.ebs[[i]]$year <- ebs.name[i,3]}
+
+for(i in 1:length(out.bs)){
+out.bs[[i]]$region <- bs.name[i,1]
+out.bs[[i]]$species <- bs.name[i,2]
+out.bs[[i]]$year <- bs.name[i,3]}
+
+
+
+# in each list,bind all dataframes to one dataframe
+out.ns <- data.table::rbindlist(out.ns) %>%
+  dplyr::as_data_frame()
+
+out.swc <- data.table::rbindlist(out.swc) %>%
+  dplyr::as_data_frame()
+
+out.ebs <- data.table::rbindlist(out.ebs) %>%
+  dplyr::as_data_frame()
+
+out.bs <- data.table::rbindlist(out.bs) %>%
+  dplyr::as_data_frame()
+
+
+# bind four dataframes
+dd.co <- data.table::rbindlist(list(out.ns, out.swc,out.ebs,out.bs)) %>%
+  dplyr::as_data_frame()
+
+dd.co <- as_tibble(dd.co)
+
+# rename
+dd.co <- dd.co %>% rename(size_group_1 = entity_1,
+                 size_group_2 = entity_2) %>% 
+  relocate(region, .before = size_group_1) %>% 
+   relocate(species,.after = region) %>% 
+   relocate(year, .after = species) %>% 
+  mutate(size_group_1 = str_remove(size_group_1, "V"),
+         size_group_2 = str_remove(size_group_2, "V"))
+ 
+```
+
+
+# save & read dd.co
+```{r}         
+
+write.csv(dd.co,"output/co.dd.csv",row.names=F)
+dd.co <- read.csv("output/co.dd.csv")
+
+```
+
+

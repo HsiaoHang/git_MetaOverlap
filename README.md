@@ -1,6 +1,4 @@
-# git_MetaOverlap
-
-This repository contains two folders: [code], and [output], to reproduce all the results of the paper 'Co-occurrence between size groups within populations decreases with maximum body size across marine fish populations'. 
+This repository contains two folders: [code] and [output], to reproduce all the results of the paper 'Co-occurrence between size groups within populations decreases with maximum body size across marine fish populations'. 
 
 
 a. The [code] folder contains eight R scripts, which should be run sequentially from 01 to 08.

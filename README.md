@@ -17,5 +17,5 @@ b. The [output] folder contains following files:
 5. [trait.table.csv] is compiled life history traits for each studied populations, generated from <08_plot_cooccurrence.Rmd>
 
 
-Data supporting the results of this paper is available at Dryad (link). 
+Data supporting the results of this paper is available at Dryad https://doi.org/10.5061/dryad.w3r228145. 
 
